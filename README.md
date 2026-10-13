@@ -9,10 +9,25 @@ Survival de zombis cooperativo para jugar online entre dos (o hasta cuatro) pers
 
 ## Jugar sin instalar Godot (Windows)
 
-Cada vez que se sube un cambio a `main`, GitHub prueba el juego y genera el ejecutable:
+Cada vez que se sube un cambio a `main`, GitHub prueba el juego y genera el ejecutable de
+Windows y el APK de Android:
 ve a **Releases → Pueblo Muerto (última versión)** en la página del repositorio, descarga
 `PuebloMuerto-windows.zip`, descomprímelo y abre `PuebloMuerto.exe`. Windows avisará de que
 es una app desconocida (no está firmada): *Más información → Ejecutar de todas formas*.
+
+## Jugar en Android
+
+En la misma página de **Releases** está `PuebloMuerto-android.apk`. Descárgalo desde el móvil
+y ábrelo; Android pedirá permiso para instalar apps de fuera de la tienda (solo la primera
+vez). Las versiones nuevas se instalan encima sin perder la partida.
+
+- **Controles táctiles:** pon el dedo en la mitad izquierda y aparece un joystick (empujado del
+  todo hacia delante, corres); arrastra en la mitad derecha para mirar. Botones: GOLPE, USAR,
+  SALTO, AGACH., ARMA, LUZ y, arriba, 1-4, MOCHILA, MAPA y pausa. En *Ajustes* puedes forzarlos
+  o quitarlos (por ejemplo, si juegas con mando en el móvil).
+- El móvil usa una versión más ligera de la tinta (sin el contorno por normales), menos
+  resolución 3D y sombras bajas. Se cambia en *Ajustes*.
+- Online igual que en PC: con Tailscale instalado en el móvil (app oficial) usa la IP `100.x`.
 
 ## Abrir el proyecto
 
@@ -48,6 +63,20 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
 | F (al volante) | faros |
 | E (con un mueble abierto) | cerrar la ventana del mueble |
 | Esc | menú |
+
+**Con mando** (Xbox / PlayStation / genérico):
+
+| Botón | Acción |
+|---|---|
+| Stick izquierdo / derecho | moverte / mirar |
+| RT · LT (o L3) | golpear · correr |
+| A · B · X · Y | saltar · agacharte (y cerrar menús) · usar · cambiar de arma |
+| LB · RB | linterna · molotov |
+| Cruceta ↑ → ↓ ← | comer · beber · curarte · girar al construir |
+| Select · Start · R3 | mochila · pausa · mapa |
+
+Los menús se recorren con la cruceta y A. En el mapa: stick izquierdo para moverte, derecho
+para acercar y A para marcar en la cruz.
 
 ### Supervivencia
 
@@ -139,6 +168,18 @@ godot --path godot -- --host --name=Miguel
 godot --path godot -- --join=127.0.0.1 --name=Invitada
 ```
 
+## Dificultad
+
+Al crear una partida nueva eliges la dificultad (se guarda con la partida y vale para los dos
+jugadores):
+
+| | Zombis | Daño y velocidad | Botín | Hambre y sed | Hordas | Infección |
+|---|---|---|---|---|---|---|
+| Fácil | 60 % | 60 % · 85 % | 140 % | 70 % | cada 9 noches | la mitad |
+| Normal | 100 % | 100 % | 100 % | 100 % | cada 7 noches | normal |
+| Difícil | 130 % | 130 % · 110 % | 75 % | 125 % | cada 5 noches | 150 % |
+| Pesadilla | 170 % | 160 % · 120 % | 55 % | 150 % | cada 4 noches | el doble |
+
 ## Guardado
 
 La partida se guarda sola cada minuto, al salir al menú y al cerrar la ventana. El anfitrión
@@ -167,6 +208,10 @@ Los sitios especiales del mapa se pueden diseñar en el editor de Godot, en `god
    cuando entras.
 5. Añade la escena a la lista `PREFABS` de `scripts/world_layout.gd` con su posición y giro.
 
+> La clave con la que se firma el APK está en `.github/android/` (contraseña `pueblomuerto`)
+> para poder actualizar la app sin desinstalarla. Vale para jugar entre amigos; para
+> publicar en Google Play habría que crear una clave privada y guardarla como secreto.
+
 ## Pruebas automáticas
 
 ```
@@ -175,7 +220,8 @@ godot/tests/run_all.sh /ruta/a/godot
 
 Prueba una partida en solitario (registrar, peso, bultos, cadáver, guardado, combate,
 fabricar, construir, hordas, carga por zonas, casas de dos plantas, conducir, mapa, ropa,
-habilidades, tipos de zombi, caza, huerto, la historia de principio a fin, pausa)
+habilidades, tipos de zombi, caza, huerto, la historia de principio a fin, dificultad, mando,
+controles táctiles, pausa)
 y una partida con dos jugadores conectados (muebles, estructuras, conducir un coche del
 anfitrión, marcas compartidas, ropa visible, zombis especiales, historia compartida, levantar
 al compañero). GitHub las ejecuta en cada cambio.
@@ -223,6 +269,9 @@ godot/
   scripts/paper_map.gd mapa de papel (M)
   scripts/animal.gd    ciervos y conejos
   scripts/story.gd     historia: objetivos, radio y rescate
+  scripts/difficulty.gd niveles de dificultad
+  scripts/touch_controls.gd controles táctiles del móvil
+  shaders/ink_post_mobile.gdshader  tinta para el móvil (y _simple para OpenGL)
   lugares/             lugares hechos a mano en el editor (.tscn)
   shaders/             sombreado de cómic y postproceso de tinta
   fonts/               tipografías (licencias OFL / Apache incluidas)
@@ -251,4 +300,5 @@ mapa **semiprocedural con lugares hechos a mano**, y al morir **la mochila queda
   vehículos con gasolina y copiloto, mapa de papel con marcas compartidas
 - [x] **Fase 5 · Profundidad:** ropa y mochilas con protección, habilidades, zombis corredores,
   brutos, gritones y policías, caza, huerto e historia con rescate en helicóptero
-- [ ] **Fase 6 · Pulido:** Android, mando, dificultad configurable
+- [x] **Fase 6 · Pulido:** dificultad configurable, mando, Android (controles táctiles,
+  renderizador móvil, APK automático)
