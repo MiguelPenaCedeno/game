@@ -22,6 +22,8 @@ var _horde_warned_day := 0
 ## los zombis nuevos aparecen al menos así de lejos de cualquier jugador
 const ZOMBIE_SPAWN_MIN_DIST := 30.0
 const INK_SHADER := preload("res://shaders/ink_post.gdshader")
+const INK_SHADER_MOBILE := preload("res://shaders/ink_post_mobile.gdshader")
+const INK_SHADER_SIMPLE := preload("res://shaders/ink_post_simple.gdshader")
 const FONT_TITLE := preload("res://fonts/SpecialElite-Regular.ttf")
 const FONT_UI := preload("res://fonts/BarlowCondensed-SemiBold.ttf")
 const INK := Color(0.07, 0.065, 0.075)
@@ -50,6 +52,9 @@ var status_label: Label
 var hud: Control
 var new_game_check: CheckBox
 var save_label: Label
+var difficulty_option: OptionButton
+var difficulty_info: Label
+var pause_info: Label
 var _autosave: Timer
 var settings_panel: CenterContainer
 var _settings_return: Control
@@ -87,6 +92,55 @@ func _process(_delta: float) -> void:
 	_update_ink_daylight()
 
 
+## el último mando usado fue un mando (cambia cómo se navegan los menús)
+var pad_mode := false
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton or (event is InputEventJoypadMotion and absf(event.axis_value) > 0.4):
+		if not pad_mode:
+			pad_mode = true
+			_focus_visible_panel()
+	elif event is InputEventMouseButton or event is InputEventKey:
+		pad_mode = false
+
+
+## "Atrás": B del mando (o clic derecho) cierra lo que esté abierto.
+func _is_back(event: InputEvent) -> bool:
+	return event.is_action_pressed("ui_cancel") or event.is_action_pressed("cancel")
+
+
+## ¿Los controles mueven al personaje? Sin menús abiertos y con el ratón capturado,
+## un mando o la pantalla táctil.
+func gameplay_input() -> bool:
+	if not in_game or pause_panel.visible or settings_panel.visible or hud.is_blocking():
+		return false
+	return Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or pad_mode or Settings.touch_active() \
+		or DisplayServer.get_name() == "headless"
+
+
+## Con el mando, el primer botón del panel abierto recibe el foco.
+func _focus_visible_panel() -> void:
+	if not pad_mode:
+		return
+	for panel in [settings_panel, pause_panel, menu_panel]:
+		if panel and panel.visible:
+			focus_first(panel)
+			return
+	if hud and hud.visible:
+		hud.focus_open_panel()
+
+
+static func focus_first(root: Control) -> void:
+	var owner_focus := root.get_viewport().gui_get_focus_owner()
+	if owner_focus and root.is_ancestor_of(owner_focus) and owner_focus.is_visible_in_tree():
+		return
+	for b in root.find_children("*", "BaseButton", true, false):
+		if b.is_visible_in_tree() and not (b as BaseButton).disabled:
+			(b as Control).grab_focus()
+			return
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not in_game:
 		return
@@ -109,7 +163,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		hud.toggle_inventory()
 	elif event.is_action_pressed("interact") and hud.inventory.visible:
 		hud.close_panel()
-	elif event is InputEventMouseButton and event.pressed and not pause_panel.visible and not hud.is_blocking():
+	elif _is_back(event) and settings_panel.visible:
+		_close_settings()
+	elif _is_back(event) and pause_panel.visible:
+		_set_paused(false)
+	elif _is_back(event) and hud.is_blocking() and not hud.death.visible:
+		hud.close_all()
+	elif event is InputEventMouseButton and event.pressed and not pause_panel.visible and not hud.is_blocking() \
+			and not Settings.touch_active():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
@@ -240,6 +301,10 @@ func _back_to_menu(message: String) -> void:
 
 
 func _set_paused(open: bool) -> void:
+	if open and pause_info:
+		pause_info.text = "Dificultad: %s" % Difficulty.NAMES.get(world.difficulty, "Normal")
+	if open:
+		_focus_visible_panel.call_deferred()
 	# jugando solo se detiene todo; con otra persona conectada el mundo sigue
 	pause_panel.visible = open
 	get_tree().paused = open and not Network.is_online()
@@ -327,6 +392,29 @@ func _build_ui() -> void:
 	new_game_check.add_theme_color_override("font_hover_color", ACCENT)
 	new_game_check.add_theme_color_override("font_pressed_color", ACCENT)
 	box.add_child(new_game_check)
+	# dificultad (solo cuenta al empezar una partida nueva)
+	var diff_row := HBoxContainer.new()
+	diff_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	var diff_l := Label.new()
+	diff_l.text = "Dificultad de la partida nueva:"
+	diff_row.add_child(diff_l)
+	difficulty_option = OptionButton.new()
+	for lvl in Difficulty.ORDER:
+		difficulty_option.add_item(Difficulty.NAMES[lvl])
+	difficulty_option.selected = Difficulty.ORDER.find(Settings.difficulty)
+	difficulty_option.item_selected.connect(func(i):
+		Settings.set_value("difficulty", Difficulty.ORDER[i])
+		difficulty_info.text = Difficulty.DESCRIPTIONS[Difficulty.ORDER[i]])
+	diff_row.add_child(difficulty_option)
+	box.add_child(diff_row)
+	difficulty_info = Label.new()
+	difficulty_info.text = Difficulty.DESCRIPTIONS[Settings.difficulty]
+	difficulty_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	difficulty_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	difficulty_info.add_theme_font_size_override("font_size", 16)
+	difficulty_info.add_theme_color_override("font_color", Color(INK, 0.7))
+	difficulty_info.custom_minimum_size.x = 460
+	box.add_child(difficulty_info)
 	_refresh_save_info()
 	box.add_child(_button("Jugar solo", _on_solo_pressed))
 	box.add_child(_button("Crear partida (anfitrión)", _on_host_pressed))
@@ -359,9 +447,14 @@ func _build_ui() -> void:
 	ptitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pbox.add_child(ptitle)
 	var keys := Label.new()
-	keys.text = "WASD moverte · Shift correr · C agacharte · Espacio saltar\nClic golpear o disparar · E registrar · Q cambiar arma\n1 comer · 2 beber · 3 vendarte · Tab mochila"
+	keys.text = "WASD moverte · Shift correr · C agacharte · Espacio saltar\nClic golpear o disparar · E usar · Q cambiar arma · F linterna\n1 comer · 2 beber · 3 curarte · 4 molotov · Tab mochila · M mapa\n\nCon mando: stick izq. moverte · stick der. mirar · RT golpear · A saltar\nX usar · B agacharte · Y arma · LB linterna · RB molotov · LT correr\nCruceta: comer / beber / curarte / girar · Select mochila · R3 mapa"
 	keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	keys.add_theme_font_size_override("font_size", 17)
 	pbox.add_child(keys)
+	pause_info = Label.new()
+	pause_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pause_info.add_theme_color_override("font_color", ACCENT)
+	pbox.add_child(pause_info)
 	pbox.add_child(_button("Seguir jugando", func(): _set_paused(false)))
 	pbox.add_child(_button("Ajustes", func(): _open_settings(pause_panel)))
 	pbox.add_child(_button("Salir al menú principal", _on_leave_pressed))
@@ -408,7 +501,11 @@ func _add_ink_pass() -> void:
 	mesh.size = Vector2(2, 2)
 	quad.mesh = mesh
 	var mat := ShaderMaterial.new()
-	mat.shader = INK_SHADER
+	# el contorno por normales solo existe en Forward+ (PC); el móvil usa otra versión
+	match RenderingServer.get_current_rendering_method():
+		"forward_plus": mat.shader = INK_SHADER
+		"mobile": mat.shader = INK_SHADER_MOBILE
+		_: mat.shader = INK_SHADER_SIMPLE
 	mat.render_priority = -100  # antes que los textos 3D (nombres)
 	quad.material_override = mat
 	_ink_mat = mat
@@ -537,7 +634,7 @@ func _refill_zombies() -> void:
 			if z.global_position.distance_to(p.global_position) < 75.0:
 				around += 1
 		for i in mini(_local_target(p.global_position) - around, 3):
-			if alive.size() >= ZOMBIE_MAX * maxi(players.get_child_count(), 1):
+			if alive.size() >= int(ZOMBIE_MAX * world.diff("zombies")) * maxi(players.get_child_count(), 1):
 				break
 			_spawn_zombie(p.global_position)
 
@@ -588,7 +685,7 @@ func zombie_target() -> int:
 	var n: int = ZOMBIE_COUNT + (world.day_number() - 1) * 4
 	if world.night:
 		n = int(n * 1.4)
-	return mini(n, ZOMBIE_MAX)
+	return int(mini(n, ZOMBIE_MAX) * world.diff("zombies"))
 
 
 ## Qué tipo de zombi sale: más corredores y brutos cada día que pasa (y en las hordas);
@@ -693,6 +790,7 @@ func _prepare_world() -> void:
 	if d.is_empty():
 		SaveGame.delete_world()
 		world.reset_containers()
+		world.set_difficulty(Settings.difficulty)
 		world.story.start_new()
 		Network.world_id = SaveGame.new_world_id()
 		SaveGame.save_world({"world_id": Network.world_id})
@@ -811,6 +909,8 @@ func _build_settings() -> void:
 	_slider(grid, "Grosor de la tinta", "line_width", 0.6, 2.5, 0.1, func(v): return "%.1f" % v)
 	_slider(grid, "Trama en sombras", "hatching", 0.0, 1.0, 0.05, func(v): return "%d%%" % roundi(v * 100))
 	_slider(grid, "Grano del papel", "grain", 0.0, 0.2, 0.01, func(v): return "%d%%" % roundi(v * 500))
+	_slider(grid, "Cámara con mando", "pad_sensitivity", 1.0, 5.0, 0.1, func(v): return "%.1f" % v)
+	_option(grid, "Controles táctiles", "touch_controls", ["Automático", "Siempre", "Nunca"])
 	box.add_child(_button("Volver", _close_settings))
 
 
@@ -862,13 +962,19 @@ func _option(grid: GridContainer, text: String, key: String, options: Array) -> 
 
 # ------------------------------------------------------------------ hordas
 func is_horde_day(day: int) -> bool:
-	return day % HORDE_EVERY == 0
+	return day % horde_every() == 0
 
 
 ## Días que faltan para la próxima horda (0 = esta noche).
 func days_to_horde() -> int:
 	var day: int = world.day_number()
-	return (HORDE_EVERY - day % HORDE_EVERY) % HORDE_EVERY
+	var every := horde_every()
+	return (every - day % every) % every
+
+
+## Noches entre hordas (según la dificultad; 7 en normal).
+func horde_every() -> int:
+	return int(world.diff("horde_every"))
 
 
 func _on_night_changed(is_night: bool) -> void:

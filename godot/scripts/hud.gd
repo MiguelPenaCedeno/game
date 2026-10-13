@@ -33,6 +33,8 @@ var minimap: Control
 var objective: Label
 ## mapa de papel a pantalla completa (M)
 var paper_map: PaperMap
+## controles en pantalla para el móvil
+var touch: TouchControls
 ## hoja de papel para leer notas y mensajes de radio
 var note_panel: CenterContainer
 var note_title: Label
@@ -70,6 +72,7 @@ func bind_player(p: Node3D) -> void:
 	minimap.world = world
 	paper_map.player = p
 	paper_map.world = world
+	touch.player = p
 	p.message.connect(toast)
 	if not world.night_changed.is_connected(_on_night_changed):
 		world.night_changed.connect(_on_night_changed)
@@ -95,6 +98,31 @@ func set_info(text: String) -> void:
 	info_label.text = text
 
 
+func hide_death() -> void:
+	death.visible = false
+
+
+## Cierra la mochila, el mapa o la nota que haya abierta (B del mando).
+func close_all() -> void:
+	if note_panel.visible:
+		close_note()
+	elif paper_map.visible:
+		close_map()
+	elif inventory.visible:
+		close_panel()
+
+
+## Con el mando: foco en el primer botón del panel abierto.
+func focus_open_panel() -> void:
+	var main := get_tree().get_first_node_in_group("main")
+	if main == null or not main.pad_mode:
+		return
+	for panel in [note_panel, inventory, death]:
+		if panel.visible:
+			main.focus_first(panel)
+			return
+
+
 func is_blocking() -> bool:
 	return inventory.visible or death.visible or paper_map.visible or note_panel.visible
 
@@ -115,6 +143,7 @@ func show_paper(title: String, text: String) -> void:
 	note_panel.visible = true
 	Sfx.play("search", -6.0, 1.8)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	focus_open_panel.call_deferred()
 
 
 func close_note() -> void:
@@ -379,6 +408,7 @@ func _process(_delta: float) -> void:
 
 # ------------------------------------------------------------------ inventario
 func _refresh_inventory() -> void:
+	focus_open_panel.call_deferred()
 	for c in inv_list.get_children():
 		c.queue_free()
 	for c in cont_list.get_children():
@@ -547,6 +577,12 @@ func _item_row(k: String, n: int, buttons: Array) -> HBoxContainer:
 	return row
 
 
+func _scroll() -> ScrollContainer:
+	var sc := ScrollContainer.new()
+	sc.follow_focus = true
+	return sc
+
+
 func _section(text: String) -> Label:
 	var l := Label.new()
 	l.text = text
@@ -572,7 +608,10 @@ func _on_died(cause: String) -> void:
 	var tw := create_tween()
 	tw.tween_interval(2.0)
 	tw.tween_callback(func():
+		if player == null or not player.dead:
+			return  # ya reapareció
 		death.visible = true
+		focus_open_panel.call_deferred()
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE)
 
 
@@ -711,6 +750,8 @@ func _build() -> void:
 
 	_build_inventory()
 	_build_death()
+	touch = TouchControls.new()
+	add_child(touch)
 	paper_map = PaperMap.new()
 	add_child(paper_map)
 	_build_note()
@@ -761,7 +802,7 @@ func _build_inventory() -> void:
 	title.add_theme_font_override("font", FONT_TITLE)
 	title.add_theme_font_size_override("font_size", 30)
 	inv_box.add_child(title)
-	var inv_scroll := ScrollContainer.new()
+	var inv_scroll := _scroll()
 	inv_scroll.custom_minimum_size = Vector2(420, 380)
 	inv_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	inv_box.add_child(inv_scroll)
@@ -782,7 +823,7 @@ func _build_inventory() -> void:
 	craft_where.add_theme_font_size_override("font_size", 15)
 	craft_where.add_theme_color_override("font_color", Color(INK, 0.65))
 	craft_box.add_child(craft_where)
-	var scroll := ScrollContainer.new()
+	var scroll := _scroll()
 	scroll.custom_minimum_size = Vector2(380, 360)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	craft_box.add_child(scroll)

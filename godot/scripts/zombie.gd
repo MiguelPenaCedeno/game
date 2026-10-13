@@ -130,7 +130,7 @@ func _ready() -> void:
 	if multiplayer.is_server():
 		var v: Dictionary = VARIANTS.get(variant, VARIANTS.normal)
 		hp = randf_range(v.hp.x, v.hp.y)
-		speed = randf_range(v.speed.x, v.speed.y)
+		speed = randf_range(v.speed.x, v.speed.y) * _world.diff("zombie_speed")
 		target_pos = position
 		_think = randf() * 0.3
 		if horde:
@@ -346,7 +346,7 @@ func _try_attack() -> void:
 		return
 	_attack_cd = randf_range(1.0, 1.4)
 	var peer := target_player.name.to_int()
-	target_player.take_hit.rpc_id(peer, randf_range(7.0, 12.0) * VARIANTS[variant].dmg, global_position)
+	target_player.take_hit.rpc_id(peer, randf_range(7.0, 12.0) * VARIANTS[variant].dmg * _world.diff("zombie_dmg"), global_position)
 
 
 ## Lo llama el jugador que golpea o dispara.

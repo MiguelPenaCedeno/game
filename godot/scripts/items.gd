@@ -50,10 +50,11 @@ const CARRY_HEAVY := 14.0
 const CARRY_MAX := 20.0
 
 
-static func roll_loot(type: String) -> Dictionary:
+## `mult`: más o menos botín según la dificultad.
+static func roll_loot(type: String, mult := 1.0) -> Dictionary:
 	var out := {}
 	for entry in (CONTAINERS[type] as ContainerData).loot:
-		if randf() < entry[1]:
+		if randf() < minf(entry[1] * mult, 0.97):
 			var lo: int = entry[2] if entry.size() > 2 else 1
 			var hi: int = entry[3] if entry.size() > 3 else 1
 			out[entry[0]] = out.get(entry[0], 0) + randi_range(lo, hi)

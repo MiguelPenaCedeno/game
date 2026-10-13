@@ -219,6 +219,10 @@ func _process(delta: float) -> void:
 	var airborne := is_multiplayer_authority() and riding == "" and not is_on_floor() and absf(velocity.y) > 1.0
 	figure.animate(delta, _ground_speed, crouching, airborne)
 	if is_multiplayer_authority():
+		# stick derecho del mando
+		var stick := Input.get_vector("look_left", "look_right", "look_up", "look_down")
+		if stick.length() > 0.0 and controls_active():
+			look(stick * Settings.pad_sensitivity * delta * Vector2(1.0, 0.7))
 		_world.update_roofs(global_position)
 		_explore_t -= delta
 		if _explore_t <= 0.0:
@@ -232,8 +236,25 @@ func _process(delta: float) -> void:
 		camera.v_offset = cos(_shake_t * 1.7) * shake * 0.25
 
 
+## ¿Van los controles al personaje? (ratón capturado, mando o pantalla táctil, sin menús abiertos)
+func controls_active() -> bool:
+	var main := get_tree().get_first_node_in_group("main")
+	return main != null and main.gameplay_input()
+
+
+## Girar la cámara: ratón, stick derecho o dedo. `rel` en radianes.
+func look(rel: Vector2) -> void:
+	if riding != "":
+		_look_yaw -= rel.x
+		_look_idle = 0.0
+	else:
+		rotate_y(-rel.x)
+	pitch = clampf(pitch - rel.y * (-1.0 if Settings.invert_y else 1.0), PITCH_MIN, PITCH_MAX)
+	pivot.rotation.x = pitch
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED or dead:
+	if not controls_active() or dead:
 		return
 	if not placing.is_empty() and not event is InputEventMouseMotion:
 		if event.is_action_pressed("attack"):
@@ -247,10 +268,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_riding_input(event)
 		return
 	if event is InputEventMouseMotion:
-		var sens: float = Settings.mouse_sensitivity
-		rotate_y(-event.relative.x * sens)
-		pitch = clampf(pitch - event.relative.y * sens * (-1.0 if Settings.invert_y else 1.0), PITCH_MIN, PITCH_MAX)
-		pivot.rotation.x = pitch
+		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			look(event.relative * Settings.mouse_sensitivity)
 	elif downed:
 		return  # en el suelo solo puedes arrastrarte
 	elif event.is_action_pressed("crouch"):
@@ -301,7 +320,7 @@ func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= GRAVITY * delta
 
-	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	var captured := controls_active()
 	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back") if captured else Vector2.ZERO
 	var dir := (transform.basis * Vector3(input.x, 0, input.y)).normalized()
 	var moving := input.length() > 0.1
@@ -427,8 +446,9 @@ func _update_stats(delta: float, running: bool) -> void:
 	stamina = clampf(stamina + (-15.0 if running else regen) * delta, 0.0, 100.0)
 	# la carga también da hambre y sed
 	var load_k := 1.0 + maxf(0.0, weight - carry_light()) / carry_max()
-	hunger = maxf(0.0, hunger - 0.17 * delta * load_k)
-	thirst = maxf(0.0, thirst - 0.24 * delta * load_k)
+	var hk: float = _world.diff("hunger")
+	hunger = maxf(0.0, hunger - 0.17 * delta * load_k * hk)
+	thirst = maxf(0.0, thirst - 0.24 * delta * load_k * hk)
 	if hunger <= 0:
 		hp -= 0.6 * delta
 	if thirst <= 0:
@@ -737,7 +757,7 @@ func take_hit(dmg: float, from: Vector3) -> void:
 	_world.spawn_blood(global_position, 0.5)
 	# la ropa gruesa también evita que el mordisco llegue a la piel
 	var r := randf() / maxf(1.0 - arm * 1.2, 0.05)
-	if r < 0.07 and not infected:
+	if r < 0.07 * _world.diff("infection") and not infected:
 		infected = true
 		message.emit("Te han mordido. La herida arde y no deja de latir.", true)
 	elif r < 0.36 and not bleeding:
@@ -782,7 +802,7 @@ func _physics_downed(delta: float) -> void:
 		return
 	if not is_on_floor():
 		velocity.y -= GRAVITY * delta
-	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	var captured := controls_active()
 	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back") if captured else Vector2.ZERO
 	var dir := (transform.basis * Vector3(input.x, 0, input.y)).normalized()
 	velocity.x = move_toward(velocity.x, dir.x * 0.6, ACCEL * delta)
@@ -859,6 +879,7 @@ func _die(cause: String) -> void:
 
 
 func respawn() -> void:
+	get_tree().call_group("hud", "hide_death")
 	hp = 100.0
 	stamina = 100.0
 	hunger = 82.0
@@ -1309,11 +1330,8 @@ func refuel(v: Node3D) -> void:
 
 func _riding_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
-		var sens: float = Settings.mouse_sensitivity
-		_look_yaw -= event.relative.x * sens
-		_look_idle = 0.0
-		pitch = clampf(pitch - event.relative.y * sens * (-1.0 if Settings.invert_y else 1.0), PITCH_MIN, PITCH_MAX)
-		pivot.rotation.x = pitch
+		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			look(event.relative * Settings.mouse_sensitivity)
 	elif event.is_action_pressed("interact"):
 		var v := _vehicle()
 		if v and absf(v.speed) > 4.0:
@@ -1474,7 +1492,7 @@ func add_xp(k: String, amount: float) -> void:
 	if not is_multiplayer_authority() or not skills.has(k):
 		return
 	var before := skill_level(k)
-	skills[k] += amount
+	skills[k] += amount * _world.diff("xp")
 	var after := skill_level(k)
 	if after > before:
 		message.emit("¡%s sube a nivel %d!" % [SKILL_NAMES[k], after], false)

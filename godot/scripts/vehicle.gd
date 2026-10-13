@@ -170,7 +170,8 @@ func _physics_process(delta: float) -> void:
 		return
 	var s := spec()
 	var mine := driver != 0 and driver == multiplayer.get_unique_id()
-	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or DisplayServer.get_name() == "headless"
+	var main := get_tree().get_first_node_in_group("main")
+	var captured: bool = main != null and main.gameplay_input()
 	var throttle := 0.0
 	var steer_in := 0.0
 	var brake := false

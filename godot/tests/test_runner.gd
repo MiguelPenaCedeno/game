@@ -187,6 +187,8 @@ func _test_solo() -> void:
 	await _test_zombie_types(p, w)
 	await _test_hunting_and_garden(p, w)
 	await _test_story(p, w)
+	await _test_difficulty(p, w)
+	await _test_pad_and_touch(p, w)
 
 	# pausa
 	main._set_paused(true)
@@ -589,6 +591,7 @@ func _test_vehicles(p: Node, w: Node) -> void:
 	check(await _wait_until(func(): return p.riding == String(v.name), 3.0), "me subo al volante")
 	check(v.driver == 1 and v.is_multiplayer_authority(), "conduzco yo")
 	var start: Vector3 = v.global_position
+	check(main.gameplay_input(), "los controles van al personaje")
 	await _drive(2.0)
 	var moved: float = v.global_position.distance_to(start)
 	check(moved > 5.0, "acelero y avanzo (%.1f m, %d km/h)" % [moved, roundi(absf(v.speed) * 3.6)])
@@ -860,6 +863,121 @@ func _test_story(p: Node, w: Node) -> void:
 	main.hud.close_note()
 	main.save_now()
 	check(SaveGame.load_world().get("story", {}).get("stage", 0) == 7, "la historia se guarda")
+
+
+# ------------------------------------------------------------------ Fase 6
+func _test_difficulty(p: Node, w: Node) -> void:
+	print("-- dificultad --")
+	w.set_time(12.0 * 60.0)
+	var normal_target: int = main.zombie_target()
+	w.set_difficulty("facil")
+	check(main.zombie_target() < normal_target and main.horde_every() == 9, "en fácil hay menos zombis y hordas cada 9 noches (%d)" % main.zombie_target())
+	var found_easy := 0
+	var found_hard := 0
+	for i in 300:
+		found_easy += Items.roll_loot("nevera", w.diff("loot")).size()
+	w.set_difficulty("pesadilla")
+	check(main.zombie_target() > normal_target and main.horde_every() == 4, "en pesadilla hay más y hordas cada 4 (%d)" % main.zombie_target())
+	for i in 300:
+		found_hard += Items.roll_loot("nevera", w.diff("loot")).size()
+	check(found_easy > found_hard * 1.3, "y el botín cambia (%d frente a %d)" % [found_easy, found_hard])
+	main.save_now()
+	check(SaveGame.load_world().get("difficulty", "") == "pesadilla", "la dificultad se guarda con la partida")
+	w.set_difficulty("normal")
+
+
+func _joy_axis(axis: int, value: float) -> void:
+	var ev := InputEventJoypadMotion.new()
+	ev.axis = axis
+	ev.axis_value = value
+	Input.parse_input_event(ev)
+
+
+func _touch(index: int, pos: Vector2, pressed: bool) -> void:
+	var ev := InputEventScreenTouch.new()
+	ev.index = index
+	ev.position = pos
+	ev.pressed = pressed
+	main.hud.touch._input(ev)
+
+
+func _drag(index: int, pos: Vector2, rel: Vector2) -> void:
+	var ev := InputEventScreenDrag.new()
+	ev.index = index
+	ev.position = pos
+	ev.relative = rel
+	main.hud.touch._input(ev)
+
+
+func _test_pad_and_touch(p: Node, w: Node) -> void:
+	print("-- mando y táctil --")
+	for z in main.zombies.get_children():
+		z.queue_free()
+	p.global_position = Vector3(0, 0.2, 4)
+	p.rotation.y = 0.0
+	w.ensure_loaded([p.global_position])
+	await _wait(0.3)
+	# mando: stick izquierdo para andar, derecho para mirar
+	_joy_axis(1, -1.0)
+	var start: Vector3 = p.global_position
+	await get_tree().process_frame
+	check(main.pad_mode, "al tocar el mando se cambia a modo mando")
+	await _wait(0.6)
+	_joy_axis(1, 0.0)
+	check(p.global_position.distance_to(start) > 1.0, "el stick izquierdo te mueve (%.1f m)" % p.global_position.distance_to(start))
+	var yaw: float = p.rotation.y
+	_joy_axis(2, 1.0)
+	await _wait(0.4)
+	_joy_axis(2, 0.0)
+	check(absf(angle_difference(yaw, p.rotation.y)) > 0.3, "el stick derecho gira la cámara")
+	main.hud.toggle_inventory()
+	await _wait(0.1)
+	var focused: Control = main.get_viewport().gui_get_focus_owner()
+	check(focused != null and main.hud.inventory.is_ancestor_of(focused), "con el mando, la mochila se navega con foco")
+	var b := InputEventJoypadButton.new()
+	b.button_index = JOY_BUTTON_B
+	b.pressed = true
+	Input.parse_input_event(b)
+	await _wait(0.1)
+	b = b.duplicate()
+	b.pressed = false
+	Input.parse_input_event(b)
+	check(not main.hud.inventory.visible, "B cierra la mochila")
+	# táctil
+	var old_touch: int = Settings.touch_controls
+	Settings.touch_controls = 1
+	main.pad_mode = false
+	await _wait(0.1)
+	check(main.hud.touch.active() and main.gameplay_input(), "los controles táctiles se activan")
+	var sz: Vector2 = main.hud.touch.size
+	start = p.global_position
+	_touch(0, Vector2(sz.x * 0.15, sz.y * 0.7), true)
+	_drag(0, Vector2(sz.x * 0.15, sz.y * 0.7 - 90.0), Vector2(0, -90))
+	check(Input.get_action_strength("move_forward") > 0.6, "el joystick de la izquierda empuja hacia delante")
+	await _wait(0.6)
+	_touch(0, Vector2(sz.x * 0.15, sz.y * 0.7 - 90.0), false)
+	check(p.global_position.distance_to(start) > 1.0 and Input.get_action_strength("move_forward") == 0.0, "y al soltar paras (%.1f m)" % p.global_position.distance_to(start))
+	yaw = p.rotation.y
+	_touch(1, Vector2(sz.x * 0.7, sz.y * 0.4), true)
+	_drag(1, Vector2(sz.x * 0.7 + 120, sz.y * 0.4), Vector2(120, 0))
+	_touch(1, Vector2(sz.x * 0.7 + 120, sz.y * 0.4), false)
+	check(absf(angle_difference(yaw, p.rotation.y)) > 0.3, "arrastrar a la derecha gira la cámara")
+	var attacks: int = p.attack_count
+	p._attack_cd = 0.0
+	p.stamina = 100.0
+	var golpe: Vector2 = TouchControls.BUTTONS[0][2] * main.hud.touch._scale()
+	_touch(2, golpe, true)
+	await _wait(0.05)
+	_touch(2, golpe, false)
+	check(p.attack_count > attacks, "el botón GOLPE golpea")
+	var mapa: Vector2 = TouchControls.BUTTONS[11][2] * main.hud.touch._scale()
+	_touch(3, mapa, true)
+	_touch(3, mapa, false)
+	await _wait(0.1)
+	check(main.hud.paper_map.visible, "y el botón MAPA abre el mapa")
+	main.hud.close_map()
+	Settings.touch_controls = old_touch
+	check(load("res://shaders/ink_post_mobile.gdshader") != null and load("res://shaders/ink_post_simple.gdshader") != null, "hay tinta para el móvil y para OpenGL")
 
 
 # ------------------------------------------------------------------ construcción (Fase 3)

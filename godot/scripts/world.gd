@@ -47,6 +47,8 @@ var structures: Node3D
 var story: Node3D
 var _sun: DirectionalLight3D
 var _env: Environment
+## nivel de dificultad de esta partida (ver Difficulty)
+var difficulty := "normal"
 ## el anfitrión calcula la navegación de cada zona para los zombis
 var nav_enabled := false
 var _stream_t := 0.0
@@ -135,6 +137,16 @@ func _process(delta: float) -> void:
 		if _sync_t > 5.0:
 			_sync_t = 0.0
 			_sync_clock.rpc(game_minutes)
+
+
+## Un ajuste de la dificultad de esta partida (multiplicador o número de noches).
+func diff(key: String) -> float:
+	return Difficulty.value(difficulty, key)
+
+
+@rpc("authority", "call_local", "reliable")
+func set_difficulty(level: String) -> void:
+	difficulty = level if Difficulty.PRESETS.has(level) else "normal"
 
 
 @rpc("authority", "call_remote", "unreliable")
@@ -496,7 +508,7 @@ func _update_empty(idx: int) -> void:
 
 func _ensure_rolled(c: Dictionary) -> void:
 	if not c.get("rolled", false):
-		c.loot = Items.roll_loot(c.type)
+		c.loot = Items.roll_loot(c.type, diff("loot"))
 		# las notas y la batería de la historia siempre están en su sitio
 		for k in c.get("story", []):
 			c.loot[k] = 1
@@ -577,6 +589,7 @@ func _add_bag(idx: int, pos: Vector3, label: String, corpse: bool) -> void:
 ## muebles desmontados y vacíos, y la hora. Los contenedores nuevos van en el
 ## mismo orden que en el anfitrión para que los números coincidan.
 func send_state_to(peer: int) -> void:
+	set_difficulty.rpc_id(peer, difficulty)
 	structures.send_state_to(peer)
 	story.send_state_to(peer)
 	var dyn := []
@@ -633,7 +646,7 @@ func export_state() -> Dictionary:
 			dyn.append({"kind": "caja", "sid": c.sid, "pos": st.pos, "rot": st.rot, "loot": c.loot.duplicate()})
 		elif not c.loot.is_empty():
 			dyn.append({"kind": "bolsa", "pos": c.pos, "name": c.name, "corpse": c.corpse, "loot": c.loot.duplicate()})
-	return {"containers": conts, "dynamic": dyn, "gone": gone, "structures": structures.export_state(), "story": story.export_state(),
+	return {"containers": conts, "dynamic": dyn, "gone": gone, "structures": structures.export_state(), "story": story.export_state(), "difficulty": difficulty,
 		"minutes": game_minutes, "markers": _markers_list()}
 
 
@@ -653,6 +666,7 @@ func import_state(d: Dictionary) -> void:
 			_set_gone(i)
 	structures.import_state(d.get("structures", []))
 	story.import_state(d.get("story", {}))
+	set_difficulty(d.get("difficulty", "normal"))
 	for m in d.get("markers", []):
 		_add_marker(m[0], m[1], m[2], m[3], m[4])
 	# "bags" es el formato de antes de la Fase 2

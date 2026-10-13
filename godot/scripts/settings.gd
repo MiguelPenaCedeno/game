@@ -22,17 +22,41 @@ var hatching := 0.55
 ## grano del papel
 var grain := 0.07
 var volume := 0.8
+## dificultad elegida para las partidas nuevas
+var difficulty := "normal"
+## controles táctiles: 0 = automático (si la pantalla es táctil), 1 = siempre, 2 = nunca
+var touch_controls := 0
+## velocidad de la cámara con el stick derecho del mando
+var pad_sensitivity := 2.6
 
 const KEYS := ["mouse_sensitivity", "invert_y", "fov", "fullscreen", "vsync", "render_scale",
-	"shadows", "line_width", "hatching", "grain", "volume"]
+	"shadows", "line_width", "hatching", "grain", "volume", "difficulty", "touch_controls", "pad_sensitivity"]
 
 
 func _ready() -> void:
+	# en el móvil, valores más ligeros de partida
+	if is_mobile():
+		render_scale = 0.75
+		shadows = 1
+		grain = 0.05
 	var cfg := ConfigFile.new()
 	if cfg.load(PATH) == OK:
 		for k in KEYS:
 			set(k, cfg.get_value("ajustes", k, get(k)))
 	apply()
+
+
+static func is_mobile() -> bool:
+	return OS.has_feature("mobile") or OS.has_feature("android")
+
+
+## ¿Se muestran los controles táctiles?
+func touch_active() -> bool:
+	if touch_controls == 1:
+		return true
+	if touch_controls == 2:
+		return false
+	return is_mobile() or DisplayServer.is_touchscreen_available()
 
 
 func set_value(key: String, value: Variant) -> void:

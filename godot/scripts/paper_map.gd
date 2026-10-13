@@ -58,6 +58,16 @@ func open() -> void:
 func _process(delta: float) -> void:
 	if not visible:
 		return
+	# con el mando: stick izquierdo mueve, stick derecho acerca, A marca en el centro
+	if _pad():
+		var mv := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+		center += mv * _span() * 0.6 * delta
+		var z := Input.get_axis("look_down", "look_up")
+		if absf(z) > 0.1:
+			zoom = clampf(zoom * (1.0 + z * 1.5 * delta), 1.0, 6.0)
+		_clamp_center()
+		if Input.is_action_just_pressed("jump"):
+			_place(center)
 	_fog_t += delta
 	if _fog_t > 0.5:
 		_fog_t = 0.0
@@ -221,6 +231,10 @@ func _draw() -> void:
 			continue
 		var col: Color = INK if p == player else Network.color_for(p.name.to_int())
 		_arrow(s, p.global_rotation.y, col, 1.4 if p == player else 1.1)
+	if _pad():
+		var c := f.get_center()
+		draw_line(c + Vector2(-14, 0), c + Vector2(14, 0), INK, 2.0)
+		draw_line(c + Vector2(0, -14), c + Vector2(0, 14), INK, 2.0)
 	draw_rect(f, INK, false, 4.0)
 	# título, rosa de los vientos y leyenda
 	var title := "MAPA DEL CONDADO"
@@ -230,6 +244,8 @@ func _draw() -> void:
 	draw_colored_polygon(PackedVector2Array([nrth + Vector2(0, -22), nrth + Vector2(-7, -8), nrth + Vector2(7, -8)]), INK)
 	draw_string(FONT, nrth + Vector2(-6, 34), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, INK)
 	var legend := "Clic: marca «%s» (1-4 cambia) · Clic dcho: borrar · Arrastrar: mover · Rueda: zoom · M: cerrar" % KINDS[kind]
+	if _pad():
+		legend = "A: marca «%s» en la cruz (cruceta cambia) · stick izq.: mover · stick der.: zoom · B: cerrar" % KINDS[kind]
 	var lw := FONT.get_string_size(legend, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
 	draw_string(FONT, Vector2(f.get_center().x - lw / 2, f.end.y + 32), legend, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, PAPER)
 
@@ -273,6 +289,11 @@ func _arrow(at: Vector2, yaw: float, color: Color, sc: float) -> void:
 	draw_polyline(out, PAPER if color == INK else INK, 2.0)
 
 
+func _pad() -> bool:
+	var main := get_tree().get_first_node_in_group("main")
+	return main != null and main.pad_mode
+
+
 # ------------------------------------------------------------------ manejo
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -301,7 +322,7 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 
 
-func _unhandled_key_input(event: InputEvent) -> void:
+func _unhandled_input(event: InputEvent) -> void:
 	if not visible:
 		return
 	for i in 4:

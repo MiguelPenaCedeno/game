@@ -1,4 +1,4 @@
-name: Pruebas y ejecutable de Windows
+name: Pruebas y ejecutables (Windows y Android)
 
 on:
   push:
@@ -25,9 +25,9 @@ jobs:
           path: |
             ~/godot
             ~/.local/share/godot/export_templates
-          key: godot-${{ env.GODOT_VERSION }}-v1
+          key: godot-${{ env.GODOT_VERSION }}-v2
 
-      - name: Instalar Godot y plantillas de Windows
+      - name: Instalar Godot y plantillas de Windows y Android
         run: |
           if [ ! -f ~/godot/godot ]; then
             mkdir -p ~/godot && cd ~/godot
@@ -35,10 +35,11 @@ jobs:
             unzip -q g.zip && mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot && rm g.zip
           fi
           T=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
-          if [ ! -f "$T/windows_release_x86_64.exe" ]; then
+          if [ ! -f "$T/windows_release_x86_64.exe" ] || [ ! -f "$T/android_release.apk" ]; then
             mkdir -p "$T"
             curl -sSL -o /tmp/t.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
-            unzip -o -j -q /tmp/t.tpz templates/windows_release_x86_64.exe templates/windows_release_x86_64_console.exe templates/version.txt -d "$T"
+            unzip -o -j -q /tmp/t.tpz templates/windows_release_x86_64.exe templates/windows_release_x86_64_console.exe \
+              templates/android_release.apk templates/android_debug.apk templates/version.txt -d "$T"
             rm /tmp/t.tpz
           fi
           ~/godot/godot --version
@@ -57,11 +58,38 @@ jobs:
           (cd windows && zip -q -r ../PuebloMuerto-windows.zip .)
           ls -la
 
-      - name: Guardar el ejecutable en esta ejecución
+      - name: Exportar a Android (APK)
+        env:
+          # clave de firma del juego (para poder actualizar la app sin desinstalarla)
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ github.workspace }}/.github/android/pueblo-muerto.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: pueblomuerto
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: pueblomuerto
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/.github/android/pueblo-muerto.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: pueblomuerto
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: pueblomuerto
+        run: |
+          # el SDK de Android y Java 17 ya vienen en la máquina de GitHub
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          JDK="${JAVA_HOME_17_X64:-$JAVA_HOME}"
+          echo "SDK: $SDK · JDK: $JDK"
+          ls "$SDK/build-tools" || true
+          mkdir -p ~/.config/godot
+          for f in editor_settings-4.tres editor_settings-4.7.tres; do
+            printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\n' "$SDK" "$JDK" > ~/.config/godot/$f
+          done
+          mkdir -p builds
+          cd godot
+          ~/godot/godot --headless --export-release "Android" ../builds/PuebloMuerto-android.apk
+          test -s ../builds/PuebloMuerto-android.apk
+          ls -la ../builds
+
+      - name: Guardar los ejecutables en esta ejecución
         uses: actions/upload-artifact@v4
         with:
-          name: PuebloMuerto-windows
-          path: builds/PuebloMuerto-windows.zip
+          name: PuebloMuerto
+          path: |
+            builds/PuebloMuerto-windows.zip
+            builds/PuebloMuerto-android.apk
 
       - name: Publicar en "Releases" (versión más reciente)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -80,5 +108,10 @@ jobs:
             **Cómo jugar en Windows:** descarga `PuebloMuerto-windows.zip`, descomprímelo y abre `PuebloMuerto.exe`.
             Windows puede avisar de que es una app desconocida (no está firmada): pulsa *Más información* → *Ejecutar de todas formas*.
 
+            **Cómo jugar en Android:** descarga `PuebloMuerto-android.apk` en el móvil y ábrelo. Android pedirá permiso
+            para instalar apps de origen desconocido (solo la primera vez). Se juega con controles táctiles o con un mando.
+
             Para jugar juntos, uno pulsa *Crear partida* y el otro se une con su IP (mira el LEEME.md).
-          files: builds/PuebloMuerto-windows.zip
+          files: |
+            builds/PuebloMuerto-windows.zip
+            builds/PuebloMuerto-android.apk
