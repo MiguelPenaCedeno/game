@@ -78,6 +78,10 @@ var bleed_out := 0.0
 var _down_cause := ""
 ## compañero caído al que puedes levantar (null si ninguno)
 var revive_target: Node3D
+## estructura que tienes delante (sid, -1 si ninguna)
+var struct_target := -1
+## dónde reapareces (tu cama); INF si no tienes
+var spawn_point := Vector3.INF
 const BLEED_OUT_TIME := 40.0
 const REVIVE_TIME := 3.5
 var searched := 0
@@ -190,7 +194,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.is_action_pressed("cancel") or event.is_action_pressed("inventory"):
 			_cancel_placing()
 		elif event.is_action_pressed("rotate"):
-			placing.rot += PI / 4
+			placing.rot += _world.structures.TYPES[placing.type].get("rot_step", PI / 4)
 		return
 	if event is InputEventMouseMotion:
 		var sens: float = Settings.mouse_sensitivity
@@ -205,6 +209,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_attack()
 	elif event.is_action_pressed("interact"):
 		_start_search()
+	elif event.is_action_pressed("rotate") and struct_target >= 0 and search.is_empty():
+		var st: Dictionary = _world.structures.by_id[struct_target]
+		search = {"remove": struct_target, "t": 0.0, "dur": 2.0, "pos": global_position}
+		message.emit("Quitando %s… (devuelve la mitad del material)" % _world.structures.TYPES[st.type].name.to_lower(), false)
 	elif event.is_action_pressed("throw"):
 		_throw_molotov()
 	elif event.is_action_pressed("flashlight"):
@@ -290,11 +298,24 @@ func _physics_process(delta: float) -> void:
 	# registrar
 	interact_idx = _world.container_index_near(global_position, -global_transform.basis.z)
 	revive_target = _find_downed_teammate()
+	struct_target = _world.structures.index_near(global_position, -global_transform.basis.z) if interact_idx < 0 else -1
 	if not search.is_empty():
 		search.t += delta
 		if global_position.distance_to(search.pos) > 0.7:
 			search = {}
 			message.emit("Dejas de registrar.", false)
+		elif search.has("remove"):
+			if search.t >= search.dur:
+				_world.structures.request_remove.rpc_id(1, search.remove)
+				search = {}
+		elif search.has("repair"):
+			if search.t >= search.dur:
+				var sid: int = search.repair
+				var mat: String = _world.structures.TYPES[_world.structures.by_id[sid].type].mat if _world.structures.by_id.has(sid) else ""
+				if mat != "" and _remove_item(mat, 1) > 0:
+					_world.structures.request_repair.rpc_id(1, sid)
+					Sfx.play_at("hit", global_position, -2.0, 1.2)
+				search = {}
 		elif search.has("craft"):
 			if search.t >= search.dur:
 				_finish_craft(search.craft)
@@ -474,6 +495,8 @@ func _start_search() -> void:
 		message.emit("Levantando a %s… no te muevas." % revive_target.display_name, false)
 		return
 	if interact_idx < 0:
+		if struct_target >= 0:
+			_use_structure(struct_target)
 		return
 	var c: Dictionary = _world.containers[interact_idx]
 	# la primera vez se registra; después se abre al momento
@@ -735,6 +758,9 @@ func respawn() -> void:
 	downed = false
 	_recalc_weight()
 	position = SPAWN_POINT + Vector3(randf_range(-2, 2), 0.5, 0)
+	# si tu cama sigue en pie, reapareces junto a ella
+	if spawn_point != Vector3.INF and _world.structures.near(spawn_point, "cama", 2.0):
+		position = spawn_point
 	velocity = Vector3.ZERO
 	dead = false
 
@@ -750,6 +776,7 @@ func export_state() -> Dictionary:
 		"bleeding": bleeding, "infected": infected,
 		"inv": inv.duplicate(), "owned": owned.duplicate(), "weapon": weapon,
 		"kills": kills, "searched": searched, "alive_time": alive_time,
+		"spawn": spawn_point,
 	}
 
 
@@ -759,6 +786,7 @@ func try_load() -> void:
 		return
 	_loaded = true
 	var d := SaveGame.load_character(Network.world_id, Network.player_name)
+	spawn_point = d.get("spawn", Vector3.INF)
 	if d.is_empty() or d.get("dead", false):
 		return  # nuevo, o habías muerto: tu mochila te espera en el cadáver
 	global_position = d.pos
@@ -836,6 +864,9 @@ func start_craft(rid: String) -> void:
 	if not Items.can_craft(r, inv, owned):
 		message.emit("Te falta material: %s." % Items.ingredients_text(r), true)
 		return
+	if r.needs_tool and not has_tool():
+		message.emit("Necesitas un martillo o un hacha para construir eso.", true)
+		return
 	if r.result == "reparar":
 		var w: ItemData = Items.WEAPONS[weapon]
 		if w.dur <= 0 or owned.get(weapon, -1) >= w.dur:
@@ -899,15 +930,18 @@ func _start_placing(r: RecipeData) -> void:
 	for l in ghost.find_children("*", "Light3D", true, false):
 		l.queue_free()
 	get_tree().current_scene.add_child(ghost)
-	placing = {"recipe": r, "type": type, "ghost": ghost, "rot": rotation.y, "ok": false}
+	var step: float = _world.structures.TYPES[type].get("rot_step", PI / 4)
+	placing = {"recipe": r, "type": type, "ghost": ghost, "rot": snappedf(rotation.y, step), "ok": false}
 	message.emit("Colocar %s: clic para poner, R para girar, clic derecho para cancelar." % Items.RECIPES[r.id].name.to_lower(), false)
 
 
 func _update_placing() -> void:
 	var ghost: Node3D = placing.ghost
 	var fwd := -global_transform.basis.z
-	var p := global_position + fwd * 2.0
-	p = Vector3(snappedf(p.x, 0.25), 0.0, snappedf(p.z, 0.25))
+	var info: Dictionary = _world.structures.TYPES[placing.type]
+	var p: Vector3 = global_position + fwd * (2.0 + info.size.z * 0.5)
+	var snap: float = info.get("snap", 0.25)
+	p = Vector3(snappedf(p.x, snap), 0.0, snappedf(p.z, snap))
 	ghost.global_position = p
 	ghost.rotation.y = placing.rot
 	# ¿choca con algo?
@@ -938,7 +972,7 @@ func _confirm_placing() -> void:
 		return
 	_pay(r)
 	_recalc_weight()
-	_world.structures.request_place.rpc_id(1, placing.type, placing.ghost.global_position, placing.rot)
+	_world.structures.request_place.rpc_id(1, placing.type, placing.ghost.global_position, placing.rot, display_name)
 	_noise_spike = 8.0
 	_cancel_placing()
 
@@ -950,6 +984,29 @@ func _cancel_placing() -> void:
 
 
 # ------------------------------------------------------------------ desmontar
+## E sobre una estructura: abrir/cerrar puerta, dormir en la cama o reparar.
+func _use_structure(sid: int) -> void:
+	var s: Dictionary = _world.structures.by_id[sid]
+	var info: Dictionary = _world.structures.TYPES[s.type]
+	if s.type == "puerta" and s.hp >= info.hp * 0.999:
+		_world.structures.request_toggle.rpc_id(1, sid)
+		return
+	if s.type == "cama":
+		spawn_point = s.pos + Vector3(1.2, 0.2, 0)
+		message.emit("Duermes un rato. Si mueres, reaparecerás aquí.", false)
+		Sfx.play("revive")
+		save_state()
+		return
+	if s.hp < info.hp:
+		if inv.get(info.mat, 0) <= 0:
+			message.emit("Para reparar %s necesitas %s." % [info.name.to_lower(), Items.ITEMS[info.mat].name.to_lower()], true)
+			return
+		search = {"repair": sid, "t": 0.0, "dur": 1.5, "pos": global_position}
+		return
+	if s.type == "puerta":
+		_world.structures.request_toggle.rpc_id(1, sid)
+
+
 func start_dismantle(idx: int) -> void:
 	if not search.is_empty() or dead or downed:
 		return

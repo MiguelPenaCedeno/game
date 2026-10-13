@@ -198,8 +198,10 @@ func bake_navigation() -> void:
 		return
 	var nav := NavigationMesh.new()
 	nav.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
-	nav.geometry_source_geometry_mode = NavigationMesh.SOURCE_GEOMETRY_GROUPS_WITH_CHILDREN
-	nav.geometry_source_group_name = &"world"
+	# solo la geometría del mapa: lo que construyen los jugadores no cuenta, así
+	# los zombis van en línea recta, chocan con barricadas y muros, y los golpean
+	nav.geometry_source_geometry_mode = NavigationMesh.SOURCE_GEOMETRY_GROUPS_EXPLICIT
+	nav.geometry_source_group_name = &"navsource"
 	nav.agent_radius = 0.5
 	nav.agent_height = 1.75
 	nav.agent_max_climb = 0.25
@@ -627,6 +629,7 @@ func _process_fires(delta: float) -> void:
 
 func _register_container(body: Node3D, type: String, color: Color) -> void:
 	body.add_to_group("dynamic")
+	body.add_to_group("navsource")
 	var mesh: MeshInstance3D = body.find_children("*", "MeshInstance3D", false, false)[0]
 	containers.append({
 		"node": body, "mesh": mesh, "type": type, "name": Items.CONTAINERS[type].name,
@@ -645,6 +648,8 @@ const WORDS := {
 	"herido": ["¡AGH!", "¡AY!", "¡ARGH!"],
 	"fuego": ["¡FUUUSH!", "¡FLAMM!"],
 	"desmontar": ["¡CRAC!", "¡ÑIIIC!", "¡CLONC!"],
+	"derribo": ["¡CRASH!", "¡CATACROC!"],
+	"horda": ["¡GRAAAH!"],
 }
 
 
@@ -1056,8 +1061,14 @@ func _build_car(pos: Vector3, along_x: bool, color: Color) -> void:
 			wheel.rotation.x = PI / 2
 	# puerta abierta en algunos
 	if rng.randf() < 0.4:
-		var door := _box(Vector3(0.35, 0.85, 1.35), Vector3(1.0, 0.9, 0.06), color, false, car)
-		door.rotation.y = 0.7
+		# puerta del conductor abierta, girando sobre la bisagra delantera
+		var a := 0.9
+		var hinge := Vector3(0.85, 0, 0.9)
+		var center := hinge + Vector3(-0.5 * cos(a), 0, 0.5 * sin(a))
+		var door := _box(center + Vector3(0, 0.66, 0), Vector3(1.0, 0.62, 0.06), color, false, car)
+		door.rotation.y = a
+		var window := _box(center + Vector3(0, 1.15, 0), Vector3(0.9, 0.36, 0.04), C_GLASS, false, car, 0.0)
+		window.rotation.y = a
 	if rng.randf() < 0.4:
 		_blood(pos + Vector3(rng.randf_range(-2, 2), 0, rng.randf_range(-2, 2)), 1.3)
 
@@ -1185,6 +1196,7 @@ func _batch_static() -> void:
 		if not chunks.has(chunk):
 			var cb := StaticBody3D.new()
 			cb.name = "Colision_%d_%d" % [chunk.x, chunk.y]
+			cb.add_to_group("navsource")
 			add_child(cb)
 			chunks[chunk] = cb
 		for cs in body.get_children():

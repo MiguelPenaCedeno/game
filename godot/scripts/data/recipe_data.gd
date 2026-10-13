@@ -17,3 +17,5 @@ extends Resource
 @export var result_count := 1
 ## segundos que se tarda (quieto)
 @export var time := 2.0
+## hace falta llevar un martillo o un hacha
+@export var needs_tool := false

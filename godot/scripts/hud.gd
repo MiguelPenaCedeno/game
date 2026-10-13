@@ -181,7 +181,13 @@ func _process(_delta: float) -> void:
 		m.append("Sediento")
 	moodles.text = " · ".join(m)
 	moodles.visible = not m.is_empty()
+	var main_node := get_tree().get_first_node_in_group("main")
+	var to_horde: int = main_node.days_to_horde() if main_node else 99
 	clock.text = world.clock_text()
+	if to_horde == 0:
+		clock.text += " · ¡HORDA!" if world.night or world.hour() >= 17.0 else " · horda esta noche"
+	else:
+		clock.text += " · horda en %d d" % to_horde
 	Sfx.set_ambience(1.0 - world.daylight, clampf((30.0 - player.hp) / 30.0, 0.0, 1.0) if not player.dead else 0.0)
 
 	slots.comida.text = str(player.inv.comida)
@@ -212,10 +218,26 @@ func _process(_delta: float) -> void:
 			prompt.text = "Levantando a %s…" % player.search.revive.display_name
 		elif player.search.has("craft"):
 			prompt.text = "Fabricando %s…" % player.search.craft.name.to_lower()
+		elif player.search.has("repair"):
+			prompt.text = "Reparando…"
+		elif player.search.has("remove"):
+			prompt.text = "Quitando…"
 		elif player.search.has("dismantle"):
 			prompt.text = "Desmontando %s…" % world.containers[player.search.dismantle].name.to_lower()
 		else:
 			prompt.text = "Registrando %s…" % world.containers[player.search.idx].name.to_lower()
+		prompt_panel.visible = true
+	elif player.struct_target >= 0 and not player.revive_target and not player.dead and world.structures.by_id.has(player.struct_target):
+		var st: Dictionary = world.structures.by_id[player.struct_target]
+		var info: Dictionary = world.structures.TYPES[st.type]
+		var action := ""
+		if st.type == "puerta" and st.hp >= info.hp:
+			action = "[E] Cerrar" if st.open else "[E] Abrir"
+		elif st.type == "cama":
+			action = "[E] Dormir aquí (reapareces aquí)"
+		elif st.hp < info.hp:
+			action = "[E] Reparar (1 %s)" % Items.ITEMS[info.mat].short.to_lower()
+		prompt.text = "%s %d/%d  %s  · [R] Quitar" % [info.name, st.hp, info.hp, action]
 		prompt_panel.visible = true
 	elif player.revive_target and not player.dead:
 		prompt.text = "[E] Levantar a %s" % player.revive_target.display_name

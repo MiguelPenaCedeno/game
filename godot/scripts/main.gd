@@ -11,6 +11,9 @@ const ZOMBIE_SCENE := preload("res://scenes/zombie.tscn")
 const HUD_SCRIPT := preload("res://scripts/hud.gd")
 const ZOMBIE_COUNT := 22
 const ZOMBIE_MAX := 45
+## cada cuántos días llega una horda (esa noche)
+const HORDE_EVERY := 7
+var _horde_warned_day := 0
 ## los zombis nuevos aparecen al menos así de lejos de cualquier jugador
 const ZOMBIE_SPAWN_MIN_DIST := 30.0
 const INK_SHADER := preload("res://shaders/ink_post.gdshader")
@@ -51,6 +54,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	for n in [world, players, zombies]:
 		n.process_mode = Node.PROCESS_MODE_PAUSABLE
+	world.night_changed.connect(_on_night_changed)
 	_add_ink_pass()
 	_build_ui()
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -64,6 +68,11 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if in_game:
 		_update_hud()
+		# aviso al atardecer del día de la horda (cada equipo lo calcula con su reloj)
+		var day: int = world.day_number()
+		if is_horde_day(day) and world.hour() >= 17.0 and _horde_warned_day != day:
+			_horde_warned_day = day
+			hud.toast("Esta noche llega una HORDA. Fortificad la base: barricadas, muros y trampas.", true)
 	_update_ink_daylight()
 
 
@@ -685,3 +694,69 @@ func _option(grid: GridContainer, text: String, key: String, options: Array) -> 
 	ob.item_selected.connect(func(i): Settings.set_value(key, i))
 	grid.add_child(ob)
 	grid.add_child(Control.new())
+
+
+# ------------------------------------------------------------------ hordas
+func is_horde_day(day: int) -> bool:
+	return day % HORDE_EVERY == 0
+
+
+## Días que faltan para la próxima horda (0 = esta noche).
+func days_to_horde() -> int:
+	var day: int = world.day_number()
+	return (HORDE_EVERY - day % HORDE_EVERY) % HORDE_EVERY
+
+
+func _on_night_changed(is_night: bool) -> void:
+	if not in_game or not is_night or not is_horde_day(world.day_number()):
+		return
+	if multiplayer.is_server():
+		start_horde()
+
+
+## La horda entra por el borde del mapa y va a por la base (o a por vosotros).
+func start_horde() -> void:
+	if not multiplayer.is_server():
+		return
+	var base := _base_position()
+	var count: int = 14 + world.day_number()
+	var side := randi() % 4
+	for i in count:
+		var t := randf_range(-50.0, 50.0)
+		var edge := 64.0
+		var p: Vector3 = [Vector3(t, 0, -edge), Vector3(t, 0, edge), Vector3(-edge, 0, t), Vector3(edge, 0, t)][side]
+		var map := get_world_3d().navigation_map
+		var on_nav := NavigationServer3D.map_get_closest_point(map, p)
+		if on_nav != Vector3.ZERO:
+			p = on_nav
+		var z := ZOMBIE_SCENE.instantiate()
+		_zombie_counter += 1
+		z.name = "Z%d" % _zombie_counter
+		z.position = p + Vector3.UP * 0.1
+		z.net_pos = z.position
+		z.horde = true
+		z.horde_target = base + Vector3(randf_range(-3, 3), 0, randf_range(-3, 3))
+		zombies.add_child(z, true)
+	_horde_announce.rpc()
+
+
+@rpc("authority", "call_local", "reliable")
+func _horde_announce() -> void:
+	hud.toast("¡La HORDA está aquí! Vienen a por la base.", true)
+	for i in 3:
+		Sfx.play("groan%d" % i, 4.0, 0.7 + i * 0.1)
+	impact(0.5)
+
+
+## La base: el centro de lo construido; si no hay nada, donde estáis vosotros.
+func _base_position() -> Vector3:
+	var sum := Vector3.ZERO
+	var n := 0
+	for sid in world.structures.by_id:
+		sum += world.structures.by_id[sid].pos
+		n += 1
+	if n == 0:
+		for p in players.get_children():
+			sum += p.global_position
+			n += 1
+	return sum / maxi(n, 1)

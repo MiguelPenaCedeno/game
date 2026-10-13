@@ -53,6 +53,24 @@ func _draw() -> void:
 		draw_colored_polygon(pts, HOUSE)
 		pts.append(pts[0])
 		draw_polyline(pts, INK, 1.5)
+	# lo construido: muros como trazos de tinta, la cama con un cuadro claro
+	for sid in world.structures.by_id:
+		var st: Dictionary = world.structures.by_id[sid]
+		var sz: Vector3 = world.structures.TYPES[st.type].size
+		var c0: Vector2 = to_map.call(st.pos.x, st.pos.z)
+		var along := Vector2(cos(st.rot), -sin(st.rot)) * sz.x * 0.5
+		var a1: Vector2 = to_map.call(st.pos.x + along.x, st.pos.z + along.y)
+		var a2: Vector2 = to_map.call(st.pos.x - along.x, st.pos.z - along.y)
+		match st.type:
+			"cama":
+				draw_rect(Rect2(c0 - Vector2(4, 4), Vector2(8, 8)), PAPER)
+				draw_rect(Rect2(c0 - Vector2(4, 4), Vector2(8, 8)), INK, false, 2.0)
+			"pinchos":
+				draw_circle(c0, 2.5, Color(INK, 0.6))
+			"banco", "hoguera", "caja":
+				draw_circle(c0, 3.0, ZOMBIE if st.type == "hoguera" else INK)
+			_:
+				draw_line(a1, a2, INK, 3.0)
 	# muebles y maleteros
 	for ct in world.containers:
 		var p: Vector2 = to_map.call(ct.pos.x, ct.pos.z)

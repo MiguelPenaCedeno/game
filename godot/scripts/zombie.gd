@@ -44,6 +44,10 @@ var _dead_t := 0.0
 var _path_target := Vector3.INF
 var _anim_skip := false
 var _stagger_t := 0.0
+var _slow_t := 0.0
+## de una horda: va hacia la base de los jugadores aunque no les oiga
+var horde := false
+var horde_target := Vector3.ZERO
 var _groan_t := randf_range(2.0, 10.0)
 var _world: Node
 
@@ -77,6 +81,10 @@ func _ready() -> void:
 		speed = randf_range(1.05, 1.85) * (1.8 if randf() < 0.1 else 1.0)
 		target_pos = position
 		_think = randf() * 0.3
+		if horde:
+			state = "horde"
+			target_pos = horde_target
+			speed = maxf(speed, 1.5)
 	else:
 		set_physics_process(false)
 		position = net_pos
@@ -131,7 +139,15 @@ func _physics_process(delta: float) -> void:
 	var night_k := NIGHT_SPEED if _world and _world.night else 1.0
 	var spd := speed * 0.45 * night_k
 	_stagger_t -= delta
-	if state == "chase":
+	_slow_t -= delta
+	if state == "horde":
+		spd = speed * 1.15 * night_k
+		dest = target_pos
+		if global_position.distance_to(target_pos) < 3.0:
+			# llegó a la base: se queda rondando por aquí
+			state = "wander"
+			horde = false
+	elif state == "chase":
 		spd = speed * (1.6 if memory > 0 else 1.1) * night_k
 		if _stagger_t > 0.0:
 			spd = 0.0
@@ -156,6 +172,8 @@ func _physics_process(delta: float) -> void:
 	var next := agent.get_next_path_position()
 	var to := next - global_position
 	to.y = 0
+	if _slow_t > 0.0:
+		spd *= 0.4
 	if to.length() > 0.05 and spd > 0.0:
 		var dir := to.normalized()
 		velocity.x = move_toward(velocity.x, dir.x * spd, 8.0 * delta)
@@ -167,6 +185,19 @@ func _physics_process(delta: float) -> void:
 	var before := global_position
 	move_and_slide()
 
+	# algo construido le corta el paso: lo golpea hasta romperlo
+	if (state == "chase" or state == "horde") and spd > 0.3 and before.distance_to(global_position) < spd * delta * 0.5:
+		var sid := _structure_ahead()
+		if sid >= 0:
+			_stuck_t = 0.0
+			if _attack_cd <= 0.0:
+				_attack_cd = randf_range(1.0, 1.4)
+				var structures: Node = _world.structures
+				var stype: String = structures.by_id[sid].type
+				structures.damage(sid, randf_range(10.0, 16.0))
+				if stype == "empalizada":
+					damage(0.6, global_transform.basis.z * 0.5, "fuego")
+			return
 	# atascado contra algo: date un paso de lado
 	if spd > 0.3 and before.distance_to(global_position) < spd * delta * 0.25:
 		_stuck_t += delta
@@ -177,6 +208,22 @@ func _physics_process(delta: float) -> void:
 				memory = 0.0
 	else:
 		_stuck_t = maxf(0.0, _stuck_t - delta)
+
+
+## ¿Hay una barricada, muro o puerta justo delante?
+func _structure_ahead() -> int:
+	var fwd := -global_transform.basis.z
+	var from := global_position + Vector3.UP * 1.0
+	var q := PhysicsRayQueryParameters3D.create(from, from + fwd * 1.3, LAYER_WORLD)
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty() or not hit.collider.has_meta("sid"):
+		return -1
+	return hit.collider.get_meta("sid")
+
+
+## Los pinchos le frenan un rato.
+func slow(seconds: float) -> void:
+	_slow_t = maxf(_slow_t, seconds)
 
 
 ## Busca jugadores por el oído y la vista.
@@ -210,8 +257,18 @@ func _sense() -> void:
 	else:
 		memory -= 0.25
 		if state == "chase" and memory <= 0.0 and global_position.distance_to(target_pos) < 1.5:
-			state = "wander"
+			state = "horde" if horde else "wander"
+			if horde:
+				target_pos = horde_target
 			target_player = null
+		# de noche, la luz de una hoguera atrae a los que andan sin rumbo
+		if state == "wander" and _world and _world.night and randf() < 0.15:
+			for sid in _world.structures.by_id:
+				var st: Dictionary = _world.structures.by_id[sid]
+				if st.type == "hoguera" and global_position.distance_to(st.pos) < 28.0:
+					target_pos = st.pos + Vector3(randf_range(-2, 2), 0, randf_range(-2, 2))
+					_wander_t = 12.0
+					break
 
 
 func _line_of_sight(to: Vector3) -> bool:

@@ -34,6 +34,8 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
 | 1 · 2 · 3 | comer (el guiso primero) · beber · vendarte |
 | 4 | lanzar un cóctel molotov |
 | R / clic derecho | girar / cancelar al colocar una estructura |
+| E (mirando lo construido) | abrir/cerrar puertas · dormir en la cama · reparar (1 tablón o chatarra) |
+| R (mirando lo construido) | quitarlo (devuelve la mitad del material) |
 | F | linterna (de noche los zombis te ven de más lejos si la llevas encendida) |
 | Tab | mochila y **fabricar** (ver peso, soltar cosas, recetas) |
 | E (con un mueble abierto) | cerrar la ventana del mueble |
@@ -55,6 +57,12 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
   Las recetas son archivos en `godot/data/recipes/`: se pueden cambiar o añadir desde Godot.
 - **Materiales:** tablones, clavos, chatarra, trapos, cuerda, cinta, alcohol y botellas vacías (beber deja la botella). Salen de los muebles y, sobre todo, de **desmontarlos**: abre un mueble o maletero vacío y pulsa *Desmontar* (necesitas hacha o martillo; hace ruido). El mueble desaparece y deja sus materiales en el suelo.
 - **Estructuras:** banco, hoguera y caja se colocan con una vista previa (roja si no cabe). Se ven en los dos equipos y se guardan con la partida. La hoguera alumbra de noche; la caja guarda lo que quieras.
+- **Refugio:** fortifica casas o construye desde cero:
+  - *barricada* (a mano, con martillo o hacha) para tapar puertas; *empalizada* de estacas que pincha a quien la golpea;
+  - en el banco: *muro de madera* o *de chatarra* (el doble de resistente), *puerta* que se abre y cierra con E, *trampa de pinchos* que hiere y frena a los zombis (se desgasta);
+  - *cama* (a mano): duerme en ella con E y reaparecerás ahí al morir.
+  Los muros y puertas encajan en una rejilla de 1 m. Cada pieza tiene vida: los zombis que se topan con ella la golpean hasta derribarla (se oscurece al dañarse). Repárala con E. Los zombis no "ven" lo construido al buscar camino: van directos y chocan.
+- **Hordas:** cada 7 noches (el reloj indica cuántos días faltan). Al atardecer avisa; al caer la noche entra una horda por un borde del mapa y va hacia vuestra base (el centro de lo construido, o donde estéis si no hay nada). De noche, además, las hogueras atraen a los zombis cercanos.
 - **Molotov:** se lanza con 4 hacia donde miras y deja 7 s un charco de fuego que quema zombis… y a ti si lo pisas.
 - **Minimapa** arriba a la derecha: gira contigo. Cuadraditos amarillos = muebles sin registrar, puntos rojos = zombis cercanos, flechas de color = tus compañeros.
 
@@ -155,8 +163,8 @@ mapa **semiprocedural con lugares hechos a mano**, y al morir **la mochila queda
 - [x] **Fase 1 · Ambiente:** día y noche con linterna, sonido, onomatopeyas, sensación de golpe,
   caer herido y que tu compañero te levante
 - [x] **Fase 2 · Fabricación:** desmontar muebles, materiales, banco de trabajo, hoguera, caja, recetas, reparar, molotov
-- [ ] **Fase 3 · Refugio:** fortificar casas (barricadas con vida), construcción libre, almacenes,
-  cama, hordas cada 7 noches
+- [x] **Fase 3 · Refugio:** barricadas, muros, puertas, empalizadas y trampas con vida, cama para
+  reaparecer, hordas cada 7 noches
 - [ ] **Fase 4 · Mundo grande:** mapa por zonas con lugares hechos a mano, casas de dos pisos,
   vehículos, mapa de papel
 - [ ] **Fase 5 · Profundidad:** ropa y mochilas, habilidades, más zombis, granja y caza, historia

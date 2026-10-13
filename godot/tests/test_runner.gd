@@ -167,6 +167,7 @@ func _test_solo() -> void:
 	check(not p._teammate_alive(), "jugando solo no hay quien te levante")
 
 	await _test_crafting(p, w)
+	await _test_building(p, w)
 
 	# pausa
 	main._set_paused(true)
@@ -184,6 +185,11 @@ func _test_host() -> void:
 	# antes de que llegue: construyo un banco y desmonto un mueble
 	await _wait(0.5)
 	main.world.structures.request_place("banco", Vector3(6, 0, 10), 0.0)
+	main.world.structures.request_place("puerta", Vector3(12, 0, 10), 0.0)
+	await _wait(0.1)
+	for sid in main.world.structures.by_id:
+		if main.world.structures.by_id[sid].type == "puerta":
+			main.world.structures.request_toggle(sid)
 	main.world.request_dismantle(5)
 	check(main.world.containers[5].get("gone", false), "desmonto el mueble 5")
 	check(await _wait_until(func(): return main.players.get_child_count() >= 2, 20.0), "se une la otra persona")
@@ -223,6 +229,12 @@ func _test_client() -> void:
 		if main.world.structures.by_id[sid].type == "banco":
 			banco_ok = true
 	check(banco_ok, "veo el banco que ya había construido")
+	var door_open := false
+	for sid in main.world.structures.by_id:
+		var st: Dictionary = main.world.structures.by_id[sid]
+		if st.type == "puerta" and st.open:
+			door_open = true
+	check(door_open, "y la puerta que dejó abierta")
 	check(main.world.containers[5].get("gone", false), "y el mueble que ya había desmontado")
 	main.world.structures.request_place.rpc_id(1, "caja", Vector3(8, 0, 10), 0.0)
 	var p := _me()
@@ -377,3 +389,176 @@ func _test_crafting(p: Node, w: Node) -> void:
 	z.global_position = land
 	w.request_fire(p.global_position, land, 0.1)
 	check(await _wait_until(func(): return z.dead, 8.0), "el fuego mata al zombi")
+
+
+# ------------------------------------------------------------------ construcción (Fase 3)
+func _place(p: Node, rid: String) -> int:
+	var before: Array = main.world.structures.by_id.keys()
+	p.start_craft(rid)
+	await _wait(0.25)
+	if p.placing.is_empty() or not p.placing.ok:
+		print("    (no se pudo colocar %s)" % rid)
+		p._cancel_placing()
+		return -1
+	p._confirm_placing()
+	await _wait(0.2)
+	for sid in main.world.structures.by_id:
+		if sid not in before:
+			return sid
+	return -1
+
+
+func _test_building(p: Node, w: Node) -> void:
+	print("-- construcción --")
+	var st: Node = w.structures
+	p.global_position = Vector3(-2, 0.2, 30)
+	p.rotation.y = 0.0
+	p.inv = {"comida": 0, "agua": 0, "vendas": 0, "balas": 0, "tablones": 40, "clavos": 80, "cuerda": 5, "chatarra": 20, "trapos": 6}
+	p.owned = {"puños": -1, "martillo": 80}
+	p._recalc_weight()
+
+	# barricada delante: un zombi al otro lado que me persigue la golpea
+	var bid: int = await _place(p, "barricada")
+	check(bid >= 0 and st.by_id[bid].type == "barricada", "coloco una barricada")
+	var bpos: Vector3 = st.by_id[bid].pos
+	var z: Node = null
+	for zz in main.zombies.get_children():
+		if not zz.dead:
+			z = zz
+			break
+	z.set_physics_process(true)
+	z.global_position = bpos + Vector3(0, 0.1, -2.5)
+	z.state = "chase"
+	z.target_player = p
+	z.target_pos = p.global_position
+	z.memory = 30.0
+	var full: int = st.max_hp(bid)
+	check(await _wait_until(func(): return not st.by_id.has(bid) or st.by_id[bid].hp < full, 12.0), "el zombi golpea la barricada")
+	z.set_physics_process(false)
+	z.global_position = Vector3(60, 0, 60)
+	if st.by_id.has(bid):
+		var hp_before: int = st.by_id[bid].hp
+		var planks: int = p.inv.tablones
+		p.global_position = bpos + Vector3(0, 0.2, 1.6)
+		p.look_at(Vector3(bpos.x, p.global_position.y, bpos.z), Vector3.UP)
+		await _wait(0.2)
+		check(p.struct_target == bid, "miro la barricada")
+		p._use_structure(bid)
+		await _wait_search(p)
+		check(st.by_id[bid].hp > hp_before and p.inv.tablones == planks - 1, "la reparo con un tablón (%d -> %d)" % [hp_before, st.by_id[bid].hp])
+		# derribo: deja restos
+		var n_cont: int = w.containers.size()
+		st.damage(bid, 9999)
+		await _wait(0.2)
+		check(not st.by_id.has(bid), "si pierde toda la vida, cae")
+		check(w.containers.size() == n_cont + 1, "y deja restos en el suelo")
+
+	# puerta
+	p.global_position = Vector3(10, 0.2, 30)
+	p.rotation.y = 0.0
+	st.request_place("banco", p.global_position + Vector3(-2.5, -0.2, 1.0), 0.0)
+	await _wait(0.2)
+	var did: int = await _place(p, "puerta")
+	check(did >= 0, "coloco una puerta")
+	if did >= 0:
+		p.global_position = st.by_id[did].pos + Vector3(0, 0.2, 1.6)
+		p.look_at(st.by_id[did].pos + Vector3(0, 0.2, 0), Vector3.UP)
+		await _wait(0.2)
+		p._use_structure(did)
+		await _wait(0.2)
+		check(st.by_id[did].open and st.by_id[did].node.get_node("HojaColision").disabled, "se abre con E y deja pasar")
+		p._use_structure(did)
+		await _wait(0.2)
+		check(not st.by_id[did].open, "y se vuelve a cerrar")
+
+	# muros que encajan cada metro
+	p.global_position = Vector3(20, 0.2, 30)
+	p.rotation.y = 0.0
+	st.request_place("banco", p.global_position + Vector3(-2.5, -0.2, 1.0), 0.0)
+	await _wait(0.2)
+	var wid: int = await _place(p, "muro_madera")
+	check(wid >= 0, "coloco un muro de madera")
+	if wid >= 0:
+		var wp: Vector3 = st.by_id[wid].pos
+		check(is_equal_approx(fmod(absf(wp.x), 1.0), 0.0) and is_equal_approx(fmod(absf(wp.z), 1.0), 0.0), "encaja en la rejilla de 1 m (%s)" % str(wp))
+		# quitarlo devuelve la mitad
+		var n2: int = w.containers.size()
+		st.request_remove(wid)
+		await _wait(0.2)
+		check(not st.by_id.has(wid) and w.containers.size() == n2 + 1, "al quitarlo devuelve material")
+
+	# cama: punto de reaparición
+	p.global_position = Vector3(30, 0.2, 30)
+	p.rotation.y = 0.0
+	await _wait(0.2)
+	var cid: int = await _place(p, "cama")
+	check(cid >= 0, "coloco una cama")
+	if cid >= 0:
+		p._use_structure(cid)
+		check(p.spawn_point != Vector3.INF, "duermo en ella")
+		p._die("prueba")
+		p.respawn()
+		check(p.global_position.distance_to(st.by_id[cid].pos) < 3.0, "al morir reaparezco junto a la cama")
+
+	# al morir se quedó todo en el cadáver: material nuevo
+	p.inv = {"comida": 0, "agua": 0, "vendas": 0, "balas": 0, "tablones": 20, "clavos": 40, "cuerda": 4}
+	p.owned = {"puños": -1, "martillo": 80}
+	p._recalc_weight()
+	p.global_position = Vector3(40, 0.2, 30)
+	p.rotation.y = 0.0
+	await _wait(0.2)
+
+	# pinchos: hieren y gastan
+	st.request_place("pinchos", Vector3(44, 0, 34), 0.0)
+	await _wait(0.1)
+	var spikes := -1
+	for sid in st.by_id:
+		if st.by_id[sid].type == "pinchos":
+			spikes = sid
+	var victim: Node = null
+	for zz in main.zombies.get_children():
+		if not zz.dead and not zz.horde:
+			victim = zz
+			break
+	victim.global_position = Vector3(44, 0.1, 34)
+	var zhp: float = victim.hp
+	await _wait(1.6)
+	check(victim.dead or victim.hp < zhp, "los pinchos hieren al zombi que los pisa")
+	check(not st.by_id.has(spikes) or st.by_id[spikes].hp < st.max_hp(spikes), "y se desgastan")
+	victim.global_position = Vector3(60, 0, 60)
+
+	# guardar la vida y el estado de las piezas
+	var pid: int = await _place(p, "empalizada")
+	check(pid >= 0, "coloco una empalizada")
+	if pid >= 0:
+		st.damage(pid, 50)
+		main.save_now()
+		var saved := SaveGame.load_world()
+		w.reset_containers()
+		w.import_state(saved)
+		var found := false
+		for sid in st.by_id:
+			if st.by_id[sid].type == "empalizada" and st.by_id[sid].hp == st.max_hp(sid) - 50:
+				found = true
+		check(found, "la vida de las piezas se guarda")
+
+	# horda
+	check(main.days_to_horde() == 6, "el día 1 faltan 6 días para la horda")
+	var before: int = main.zombies.get_child_count()
+	main.start_horde()
+	await _wait(0.2)
+	var hordes: Array = main.zombies.get_children().filter(func(zz): return zz.horde)
+	check(hordes.size() >= 14, "llega una horda (%d zombis)" % hordes.size())
+	var base: Vector3 = main._base_position()
+	var d0 := 0.0
+	for hz in hordes:
+		d0 += hz.global_position.distance_to(base)
+	await _wait(4.0)
+	var d1 := 0.0
+	for hz in hordes:
+		if is_instance_valid(hz):
+			d1 += hz.global_position.distance_to(base)
+	check(d1 < d0 - 10.0, "y avanza hacia la base (%.0f -> %.0f m)" % [d0, d1])
+	for hz in hordes:
+		if is_instance_valid(hz):
+			hz.queue_free()

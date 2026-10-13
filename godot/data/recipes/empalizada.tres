@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="RecipeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/recipe_data.gd" id="1_recipe"]
+
+[resource]
+script = ExtResource("1_recipe")
+id = "empalizada"
+name = "Empalizada"
+description = "Valla baja de estacas: quien la golpea, se pincha."
+station = "manos"
+ingredients = {"tablones": 3, "cuerda": 1}
+result = "estructura:empalizada"
+result_count = 1
+time = 1.0
+needs_tool = true

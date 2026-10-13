@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="RecipeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/recipe_data.gd" id="1_recipe"]
+
+[resource]
+script = ExtResource("1_recipe")
+id = "puerta"
+name = "Puerta de madera"
+description = "Se abre y se cierra con E. Cerrada, los zombis la golpean."
+station = "banco"
+ingredients = {"tablones": 4, "clavos": 6, "cuerda": 1}
+result = "estructura:puerta"
+result_count = 1
+time = 1.0
+needs_tool = false
