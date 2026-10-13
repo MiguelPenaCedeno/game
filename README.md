@@ -7,6 +7,13 @@ Survival de zombis cooperativo para jugar online entre dos (o hasta cuatro) pers
 | `godot/` | **Versión nueva** en Godot 4. Aquí sigue el desarrollo. |
 | `web/` | Versión original en un solo HTML con Three.js. Se queda como referencia. |
 
+## Jugar sin instalar Godot (Windows)
+
+Cada vez que se sube un cambio a `main`, GitHub prueba el juego y genera el ejecutable:
+ve a **Releases → Pueblo Muerto (última versión)** en la página del repositorio, descarga
+`PuebloMuerto-windows.zip`, descomprímelo y abre `PuebloMuerto.exe`. Windows avisará de que
+es una app desconocida (no está firmada): *Más información → Ejecutar de todas formas*.
+
 ## Abrir el proyecto
 
 1. Descarga **Godot 4.7** (versión estándar, no la .NET) desde <https://godotengine.org/download>.
@@ -26,6 +33,7 @@ Survival de zombis cooperativo para jugar online entre dos (o hasta cuatro) pers
 | Q | cambiar de arma |
 | 1 · 2 · 3 | comer · beber · vendarte |
 | Tab | mochila (ver peso y soltar cosas) |
+| E (con un mueble abierto) | cerrar la ventana del mueble |
 | Esc | menú |
 
 ### Supervivencia
@@ -58,6 +66,23 @@ godot --path godot -- --host --name=Miguel
 godot --path godot -- --join=127.0.0.1 --name=Invitada
 ```
 
+## Guardado
+
+La partida se guarda sola cada minuto, al salir al menú y al cerrar la ventana. El anfitrión
+guarda el mundo (muebles, bultos, cadáveres) y cada jugador su personaje, en
+`%APPDATA%/Godot/app_userdata/Pueblo Muerto/`. Al volver a crear la partida continúas;
+marca *Empezar de cero* en el menú para borrarla. Si al morir llevabas cosas, tu mochila
+queda junto al cadáver (cuadro rojo en el minimapa).
+
+## Pruebas automáticas
+
+```
+godot/tests/run_all.sh /ruta/a/godot
+```
+
+Prueba una partida en solitario (registrar, peso, bultos, cadáver, guardado, combate, pausa)
+y una partida con dos jugadores conectados. GitHub las ejecuta en cada cambio.
+
 ## Estilo visual: novela gráfica
 
 Todo se dibuja como un cómic de terror:
@@ -84,6 +109,13 @@ godot/
   scripts/items.gd     objetos, pesos, armas y botín
   scripts/hud.gd       interfaz: estadísticas, mochila, avisos, muerte
   scripts/minimap.gd   minimapa
+  scripts/save_game.gd guardado de mundo y personaje
+  scripts/settings.gd  ajustes (autoload "Settings")
+  scripts/mesh_batcher.gd  fusiona mallas para dibujar menos piezas
+  scripts/data/        tipos de datos (ItemData, ContainerData)
+  data/items/          un .tres por objeto: nombre, peso, estadísticas de arma…
+  data/containers/     un .tres por mueble: tiempo de registro y botín
+  tests/               pruebas automáticas
   scripts/world.gd     el pueblo: casas con tejado, vallas, postes, coches, árboles
   shaders/             sombreado de cómic y postproceso de tinta
   fonts/               tipografías (licencias OFL / Apache incluidas)
@@ -93,15 +125,21 @@ Cada jugador controla su propio personaje y el `MultiplayerSynchronizer` envía 
 
 ## Hoja de ruta
 
-- [x] Pueblo provisional con cajas, personaje en tercera persona
-- [x] Estilo novela gráfica (tinta, trama, papel) y figura humana animada
-- [x] Multijugador: crear partida / unirse
-- [x] Hambre, sed, salud, sangrado e infección
-- [x] Registrar muebles y coches (compartido en cooperativo)
-- [x] Inventario **con peso** y sobrecarga
-- [x] Zombis que oyen el ruido, armas cuerpo a cuerpo y pistola
-- [x] Minimapa
-- [ ] Ciclo día/noche con linterna
-- [ ] Sonido
-- [ ] Sustituir cajas por modelos propios (`.glb` desde fotos/IA → Blender → Godot)
-- [ ] Exportar a Windows y Android
+Decisiones tomadas: construcción **híbrida** (fortificar casas y construir libremente),
+mapa **semiprocedural con lugares hechos a mano**, y al morir **la mochila queda en el cadáver**.
+
+- [x] Prototipo: pueblo, personaje en tercera persona, multijugador
+- [x] Estilo novela gráfica y figura humana animada
+- [x] Supervivencia, registrar muebles, peso, zombis, armas, minimapa
+- [x] **Fase 0 · Cimientos:** geometría fusionada (5× menos llamadas de dibujo), suavizado en red,
+  objetos en `.tres`, ventana de registro objeto a objeto, bultos y mochila en el cadáver,
+  guardado, ajustes, pausa en solitario, pruebas automáticas y `.exe` automático
+- [ ] **Fase 1 · Ambiente:** día y noche con linterna, sonido, onomatopeyas, sensación de golpe,
+  caer herido y que tu compañero te levante
+- [ ] **Fase 2 · Fabricación:** desmontar muebles, materiales, banco de trabajo, hoguera, recetas, reparar
+- [ ] **Fase 3 · Refugio:** fortificar casas (barricadas con vida), construcción libre, almacenes,
+  cama, hordas cada 7 noches
+- [ ] **Fase 4 · Mundo grande:** mapa por zonas con lugares hechos a mano, casas de dos pisos,
+  vehículos, mapa de papel
+- [ ] **Fase 5 · Profundidad:** ropa y mochilas, habilidades, más zombis, granja y caza, historia
+- [ ] **Fase 6 · Pulido:** Android, mando, dificultad configurable

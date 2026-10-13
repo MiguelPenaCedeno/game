@@ -15,7 +15,6 @@ const CROUCH_SPEED := 1.7
 const ACCEL := 14.0
 const JUMP_VELOCITY := 5.2
 const GRAVITY := 16.0
-const MOUSE_SENSITIVITY := 0.0025
 const PITCH_MIN := -1.2
 const PITCH_MAX := 0.6
 const SPAWN_POINT := Vector3(0, 0.2, 4)
@@ -148,14 +147,16 @@ func _process(delta: float) -> void:
 	figure.animate(delta, _ground_speed, crouching, airborne)
 	if is_multiplayer_authority():
 		_world.update_roofs(global_position)
+		camera.fov = Settings.fov
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED or dead:
 		return
 	if event is InputEventMouseMotion:
-		rotate_y(-event.relative.x * MOUSE_SENSITIVITY)
-		pitch = clampf(pitch - event.relative.y * MOUSE_SENSITIVITY, PITCH_MIN, PITCH_MAX)
+		var sens: float = Settings.mouse_sensitivity
+		rotate_y(-event.relative.x * sens)
+		pitch = clampf(pitch - event.relative.y * sens * (-1.0 if Settings.invert_y else 1.0), PITCH_MIN, PITCH_MAX)
 		pivot.rotation.x = pitch
 	elif event.is_action_pressed("crouch"):
 		crouching = not crouching

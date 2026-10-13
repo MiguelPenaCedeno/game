@@ -66,6 +66,7 @@ var _nav_region: NavigationRegion3D
 var _fx: Node3D
 var _fx_items: Array[Node3D] = []
 var _bags: Node3D
+var _sun: DirectionalLight3D
 ## cuántos muebles vienen del mapa; los de después son bultos y mochilas
 var _static_count := 0
 
@@ -94,6 +95,12 @@ func _ready() -> void:
 	_bags.name = "Bultos"
 	add_child(_bags)
 	_static_count = containers.size()
+
+
+func _apply_settings() -> void:
+	_sun.shadow_enabled = Settings.shadows > 0
+	_sun.directional_shadow_max_distance = 40.0 if Settings.shadows == 1 else 70.0
+	RenderingServer.directional_shadow_atlas_set_size(2048 if Settings.shadows == 1 else 4096, true)
 
 
 ## Malla de navegación para los zombis. Solo la necesita el anfitrión.
@@ -431,6 +438,9 @@ func _build_environment() -> void:
 	sun.shadow_bias = 0.04
 	sun.directional_shadow_max_distance = 70.0
 	add_child(sun)
+	_sun = sun
+	Settings.changed.connect(_apply_settings)
+	_apply_settings()
 
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR

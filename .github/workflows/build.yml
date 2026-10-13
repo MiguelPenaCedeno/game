@@ -1,0 +1,84 @@
+name: Pruebas y ejecutable de Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+jobs:
+  pruebas-y-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Caché de Godot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-v1
+
+      - name: Instalar Godot y plantillas de Windows
+        run: |
+          if [ ! -f ~/godot/godot ]; then
+            mkdir -p ~/godot && cd ~/godot
+            curl -sSL -o g.zip "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+            unzip -q g.zip && mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" godot && rm g.zip
+          fi
+          T=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          if [ ! -f "$T/windows_release_x86_64.exe" ]; then
+            mkdir -p "$T"
+            curl -sSL -o /tmp/t.tpz "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+            unzip -o -j -q /tmp/t.tpz templates/windows_release_x86_64.exe templates/windows_release_x86_64_console.exe templates/version.txt -d "$T"
+            rm /tmp/t.tpz
+          fi
+          ~/godot/godot --version
+
+      - name: Pruebas automáticas
+        run: godot/tests/run_all.sh ~/godot/godot
+
+      - name: Exportar a Windows
+        run: |
+          mkdir -p builds/windows
+          cd godot
+          ~/godot/godot --headless --export-release "Windows" ../builds/windows/PuebloMuerto.exe
+          cd ../builds
+          test -s windows/PuebloMuerto.exe
+          cp ../README.md windows/LEEME.md
+          (cd windows && zip -q -r ../PuebloMuerto-windows.zip .)
+          ls -la
+
+      - name: Guardar el ejecutable en esta ejecución
+        uses: actions/upload-artifact@v4
+        with:
+          name: PuebloMuerto-windows
+          path: builds/PuebloMuerto-windows.zip
+
+      - name: Publicar en "Releases" (versión más reciente)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git tag -f ultima
+          git push -f origin ultima
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ultima
+          name: Pueblo Muerto (última versión)
+          make_latest: true
+          body: |
+            Versión generada automáticamente desde `main` (${{ github.sha }}).
+
+            **Cómo jugar en Windows:** descarga `PuebloMuerto-windows.zip`, descomprímelo y abre `PuebloMuerto.exe`.
+            Windows puede avisar de que es una app desconocida (no está firmada): pulsa *Más información* → *Ejecutar de todas formas*.
+
+            Para jugar juntos, uno pulsa *Crear partida* y el otro se une con su IP (mira el LEEME.md).
+          files: builds/PuebloMuerto-windows.zip

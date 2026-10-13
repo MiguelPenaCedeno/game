@@ -36,6 +36,9 @@ var hud: Control
 var new_game_check: CheckBox
 var save_label: Label
 var _autosave: Timer
+var settings_panel: CenterContainer
+var _settings_return: Control
+var _ink_mat: ShaderMaterial
 var _zombie_counter := 0
 var _zombie_timer: Timer
 
@@ -65,7 +68,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not in_game:
 		return
 	if event.is_action_pressed("pause"):
-		if hud.inventory.visible:
+		if settings_panel.visible:
+			_close_settings()
+		elif hud.inventory.visible:
 			hud.close_panel()
 		elif not hud.death.visible:
 			_set_paused(not pause_panel.visible)
@@ -224,6 +229,12 @@ func _handle_cmdline() -> void:
 			name_edit.text = arg.trim_prefix("--name=")
 		elif arg == "--solo" or arg == "--host":
 			mode = arg
+		elif arg.begins_with("--test="):
+			var runner: Node = load("res://tests/test_runner.gd").new()
+			runner.mode = arg.trim_prefix("--test=")
+			runner.name = "Pruebas"
+			add_child(runner)
+			return
 		elif arg.begins_with("--join="):
 			ip_edit.text = arg.trim_prefix("--join=")
 			mode = "--join"
@@ -288,6 +299,8 @@ func _build_ui() -> void:
 	join_row.add_child(_button("Unirse", _on_join_pressed))
 	box.add_child(join_row)
 
+	box.add_child(_button("Ajustes", func(): _open_settings(menu_panel)))
+
 	status_label = Label.new()
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -309,7 +322,9 @@ func _build_ui() -> void:
 	keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pbox.add_child(keys)
 	pbox.add_child(_button("Seguir jugando", func(): _set_paused(false)))
+	pbox.add_child(_button("Ajustes", func(): _open_settings(pause_panel)))
 	pbox.add_child(_button("Salir al menú principal", _on_leave_pressed))
+	_build_settings()
 
 	# HUD
 	# interfaz de juego
@@ -355,6 +370,9 @@ func _add_ink_pass() -> void:
 	mat.shader = INK_SHADER
 	mat.render_priority = -100  # antes que los textos 3D (nombres)
 	quad.material_override = mat
+	_ink_mat = mat
+	Settings.changed.connect(_apply_ink_settings)
+	_apply_ink_settings()
 	quad.extra_cull_margin = 16384.0
 	quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(quad)
@@ -389,6 +407,23 @@ func _comic_theme() -> Theme:
 	th.set_color("caret_color", "LineEdit", INK)
 
 	th.set_color("font_color", "Label", INK)
+
+	var track := StyleBoxFlat.new()
+	track.bg_color = INK
+	track.content_margin_top = 2
+	track.content_margin_bottom = 2
+	th.set_stylebox("slider", "HSlider", track)
+	var filled := StyleBoxFlat.new()
+	filled.bg_color = ACCENT
+	filled.content_margin_top = 2
+	filled.content_margin_bottom = 2
+	th.set_stylebox("grabber_area", "HSlider", filled)
+	th.set_stylebox("grabber_area_highlight", "HSlider", filled)
+	th.set_color("font_color", "CheckBox", INK)
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		th.set_stylebox(st, "CheckBox", StyleBoxEmpty.new())
+	th.set_color("font_color", "OptionButton", INK)
+	th.set_color("font_hover_color", "OptionButton", INK)
 	return th
 
 
@@ -518,3 +553,98 @@ func _refresh_save_info() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		save_now()
+
+
+# ------------------------------------------------------------------ ajustes
+func _apply_ink_settings() -> void:
+	_ink_mat.set_shader_parameter("line_width", Settings.line_width)
+	_ink_mat.set_shader_parameter("hatch_strength", Settings.hatching)
+	_ink_mat.set_shader_parameter("grain", Settings.grain)
+
+
+func _open_settings(from: Control) -> void:
+	_settings_return = from
+	from.visible = false
+	settings_panel.visible = true
+
+
+func _close_settings() -> void:
+	settings_panel.visible = false
+	if _settings_return:
+		_settings_return.visible = true
+
+
+func _build_settings() -> void:
+	settings_panel = _centered_panel()
+	settings_panel.visible = false
+	var box := settings_panel.get_child(0).get_child(0) as VBoxContainer
+	var title := Label.new()
+	title.text = "AJUSTES"
+	title.add_theme_font_override("font", FONT_TITLE)
+	title.add_theme_font_size_override("font_size", 40)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 14)
+	grid.add_theme_constant_override("v_separation", 8)
+	box.add_child(grid)
+
+	_slider(grid, "Sensibilidad del ratón", "mouse_sensitivity", 0.0005, 0.006, 0.0001, func(v): return "%d" % roundi(v * 10000))
+	_check(grid, "Invertir eje vertical", "invert_y")
+	_slider(grid, "Campo de visión", "fov", 50, 95, 1, func(v): return "%d°" % v)
+	_slider(grid, "Volumen", "volume", 0, 1, 0.05, func(v): return "%d%%" % roundi(v * 100))
+	_check(grid, "Pantalla completa", "fullscreen")
+	_check(grid, "Sincronización vertical", "vsync")
+	_slider(grid, "Resolución 3D", "render_scale", 0.5, 1.0, 0.05, func(v): return "%d%%" % roundi(v * 100))
+	_option(grid, "Sombras", "shadows", ["Sin sombras", "Bajas", "Altas"])
+	_slider(grid, "Grosor de la tinta", "line_width", 0.6, 2.5, 0.1, func(v): return "%.1f" % v)
+	_slider(grid, "Trama en sombras", "hatching", 0.0, 1.0, 0.05, func(v): return "%d%%" % roundi(v * 100))
+	_slider(grid, "Grano del papel", "grain", 0.0, 0.2, 0.01, func(v): return "%d%%" % roundi(v * 500))
+	box.add_child(_button("Volver", _close_settings))
+
+
+func _label(grid: GridContainer, text: String) -> void:
+	var l := Label.new()
+	l.text = text
+	l.custom_minimum_size.x = 210
+	grid.add_child(l)
+
+
+func _slider(grid: GridContainer, text: String, key: String, lo: float, hi: float, step: float, fmt: Callable) -> void:
+	_label(grid, text)
+	var sl := HSlider.new()
+	sl.min_value = lo
+	sl.max_value = hi
+	sl.step = step
+	sl.value = Settings.get(key)
+	sl.custom_minimum_size = Vector2(220, 24)
+	sl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	grid.add_child(sl)
+	var val := Label.new()
+	val.text = fmt.call(sl.value)
+	val.custom_minimum_size.x = 56
+	grid.add_child(val)
+	sl.value_changed.connect(func(v):
+		val.text = fmt.call(v)
+		Settings.set_value(key, v))
+
+
+func _check(grid: GridContainer, text: String, key: String) -> void:
+	_label(grid, text)
+	var cb := CheckBox.new()
+	cb.button_pressed = Settings.get(key)
+	cb.toggled.connect(func(on): Settings.set_value(key, on))
+	grid.add_child(cb)
+	grid.add_child(Control.new())
+
+
+func _option(grid: GridContainer, text: String, key: String, options: Array) -> void:
+	_label(grid, text)
+	var ob := OptionButton.new()
+	for o in options:
+		ob.add_item(o)
+	ob.selected = Settings.get(key)
+	ob.item_selected.connect(func(i): Settings.set_value(key, i))
+	grid.add_child(ob)
+	grid.add_child(Control.new())
