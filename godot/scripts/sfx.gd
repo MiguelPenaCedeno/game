@@ -83,6 +83,7 @@ func _loop_player(name: String, db: float) -> AudioStreamPlayer:
 	p.stream = streams[name]
 	p.volume_db = db
 	add_child(p)
+	repeat(p)
 	p.play()
 	return p
 
@@ -266,12 +267,16 @@ func _mix(parts: Array) -> AudioStreamWAV:
 	return _to_wav(a)
 
 
+## Sonido para repetir sin fin. No usa el bucle del propio WAV (en algunos móviles la
+## app se cerraba justo cuando el viento volvía a empezar): quien lo reproduce lo
+## vuelve a lanzar al acabar (ver repeat()).
 func _loop(src: Variant) -> AudioStreamWAV:
-	var w: AudioStreamWAV = src if src is AudioStreamWAV else _to_wav(src)
-	w.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	w.loop_begin = 0
-	w.loop_end = w.data.size() / 2
-	return w
+	return src if src is AudioStreamWAV else _to_wav(src)
+
+
+## Hace que un reproductor vuelva a empezar su sonido cada vez que acaba.
+static func repeat(p: Node) -> void:
+	p.finished.connect(func(): p.play())
 
 
 func _to_wav(a: PackedFloat32Array) -> AudioStreamWAV:

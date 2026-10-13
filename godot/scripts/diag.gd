@@ -15,11 +15,6 @@ var crashed_last_time := false
 var previous := PackedStringArray()
 ## final del registro del motor de la sesión anterior (errores de Godot)
 var previous_engine_log := PackedStringArray()
-## lo que Android dice de los últimos cierres de la app (motivo y, si fue un fallo nativo, pistas)
-var android_exit := PackedStringArray()
-
-## si leer el motivo de Android también cerrase la app, la vez siguiente no se intenta
-const ANDROID_GUARD := "user://leyendo_android.txt"
 
 var _file: FileAccess
 var _lines := 0
@@ -39,11 +34,10 @@ func _ready() -> void:
 			and not "--test=" in " ".join(OS.get_cmdline_user_args())
 		DirAccess.rename_absolute(PATH, PREV_PATH)
 	previous_engine_log = _previous_engine_log()
-	if crashed_last_time:
-		_read_android_exit()
 	_open()
 	for l in device_info():
 		mark(l)
+	get_tree().root.size_changed.connect(func(): mark("la ventana cambia de tamaño: %s" % DisplayServer.window_get_size()))
 
 
 func _open() -> void:
@@ -86,15 +80,35 @@ func _process(delta: float) -> void:
 		mark("fotograma  fps=%d  objetos=%d  zombis=%d" % [Engine.get_frames_per_second(),
 			int(Performance.get_monitor(Performance.OBJECT_COUNT)), get_tree().get_nodes_in_group("zombies").size()])
 	# un latido cada pocos segundos: si se cierra, se ve hasta cuándo iba bien
+	_watch_wind()
 	_beat += delta
-	if _beat >= 2.0:
+	# al principio, cada segundo (los cierres llegaban a los 5-7 s); luego cada 2
+	if _beat >= (1.0 if _frames < 1500 else 2.0):
 		_beat = 0.0
 		var mem: Dictionary = OS.get_memory_info()
-		mark("vivo  fps=%d  gpu=%d MB  objetos=%d" % [
-			Engine.get_frames_per_second(),
+		mark("vivo  fps=%d  ventana=%s  gpu=%d MB  objetos=%d" % [
+			Engine.get_frames_per_second(), DisplayServer.window_get_size(),
 			int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0),
 			int(Performance.get_monitor(Performance.OBJECT_COUNT)),
 		] + ("  libre=%d MB" % int(mem.get("available", 0) / 1048576.0) if mem.get("available", -1) > 0 else ""))
+
+
+var _wind_pos := 0.0
+var _wind_wraps := 0
+
+
+## El viento es un sonido de 4 s que se repite: se apunta cuando vuelve a empezar.
+func _watch_wind() -> void:
+	if _wind_wraps >= 3:
+		return
+	var sfx := get_node_or_null("/root/Sfx")
+	if sfx == null or sfx.get("_wind") == null:
+		return
+	var pos: float = sfx._wind.get_playback_position()
+	if pos < _wind_pos - 1.0 and pos >= 0.0:
+		_wind_wraps += 1
+		mark("sonido: el viento vuelve a empezar")
+	_wind_pos = pos
 
 
 func _exit_tree() -> void:
@@ -146,56 +160,6 @@ func _previous_engine_log() -> PackedStringArray:
 	return lines.slice(maxi(0, lines.size() - 40))
 
 
-func _read_android_exit() -> void:
-	if OS.get_name() != "Android" or not Engine.has_singleton("AndroidRuntime"):
-		return
-	if FileAccess.file_exists(ANDROID_GUARD):
-		android_exit.append("(no se lee: la otra vez se cerró al intentarlo)")
-		return
-	var guard := FileAccess.open(ANDROID_GUARD, FileAccess.WRITE)
-	guard.store_line("leyendo")
-	guard.close()
-	var rt: Object = Engine.get_singleton("AndroidRuntime")
-	var act: Object = rt.call("getActivity")
-	if act != null:
-		var am: Object = act.call("getSystemService", "activity")
-		var list: Object = am.call("getHistoricalProcessExitReasons", act.call("getPackageName"), 0, 2) if am else null
-		if list != null:
-			for i in mini(int(list.call("size")), 2):
-				var info: Object = list.call("get", i)
-				android_exit.append(str(info.call("toString")))
-				# 5 = fallo nativo: Android guarda el informe (tombstone); se sacan sus textos legibles
-				if i == 0 and int(info.call("getReason")) == 5:
-					var trace: Object = info.call("getTraceInputStream")
-					if trace != null:
-						android_exit.append_array(_readable(trace.call("readAllBytes")))
-	DirAccess.remove_absolute(ANDROID_GUARD)
-
-
-## Los trozos de texto legible de un informe binario (mensaje del fallo, funciones, librerías).
-static func _readable(data: Variant) -> PackedStringArray:
-	var out := PackedStringArray()
-	if not data is PackedByteArray:
-		return out
-	var bytes: PackedByteArray = data
-	var cur := PackedByteArray()
-	var seen := {}
-	for b in bytes:
-		if b >= 32 and b < 127:
-			cur.append(b)
-			continue
-		if cur.size() >= 6:
-			var t := cur.get_string_from_ascii()
-			if not seen.has(t) and not t.begins_with("/apex/") and not t.begins_with("/system/") \
-					and not t.begins_with("/vendor/") and not t.begins_with("[anon"):
-				seen[t] = true
-				out.append(t)
-				if out.size() >= 70:
-					break
-		cur.clear()
-	return out
-
-
 ## Texto para copiar y mandar: la ficha de ahora, lo último de la vez anterior y los errores del motor.
 func report() -> String:
 	var parts := PackedStringArray()
@@ -204,10 +168,6 @@ func report() -> String:
 	parts.append("")
 	parts.append("=== LA VEZ ANTERIOR %s ===" % ("(se cerró de golpe)" if crashed_last_time else ""))
 	parts.append_array(previous.slice(maxi(0, previous.size() - 45)))
-	if not android_exit.is_empty():
-		parts.append("")
-		parts.append("=== ANDROID: POR QUÉ SE CERRÓ ===")
-		parts.append_array(android_exit)
 	if not previous_engine_log.is_empty():
 		parts.append("")
 		parts.append("=== MOTOR (la vez anterior) ===")

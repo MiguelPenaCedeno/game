@@ -96,7 +96,9 @@ func save() -> void:
 
 
 func apply() -> void:
-	if DisplayServer.get_name() != "headless":
+	# pantalla completa y sincronización son cosas del PC: en el móvil la ventana
+	# la lleva Android (pedirle "ventana" quita la pantalla completa y la redimensiona)
+	if DisplayServer.get_name() != "headless" and not is_mobile():
 		var mode := DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen else DisplayServer.WINDOW_MODE_WINDOWED
 		if DisplayServer.window_get_mode() != mode:
 			DisplayServer.window_set_mode(mode)

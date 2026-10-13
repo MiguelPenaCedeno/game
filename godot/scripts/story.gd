@@ -300,5 +300,6 @@ func _build_heli() -> Node3D:
 	_rotor_sound.max_distance = 400.0
 	_rotor_sound.volume_db = 4.0
 	_rotor_sound.autoplay = true
+	Sfx.repeat(_rotor_sound)
 	h.add_child(_rotor_sound)
 	return h
