@@ -7,22 +7,31 @@ extends Node3D
 ##   godot -- --solo | --host | --join=IP   [--name=Nombre]
 
 const PLAYER_SCENE := preload("res://scenes/player.tscn")
+const INK_SHADER := preload("res://shaders/ink_post.gdshader")
+const FONT_TITLE := preload("res://fonts/SpecialElite-Regular.ttf")
+const FONT_UI := preload("res://fonts/BarlowCondensed-SemiBold.ttf")
+const INK := Color(0.07, 0.065, 0.075)
+const PAPER := Color(0.95, 0.92, 0.84)
+const ACCENT := Color(0.62, 0.06, 0.04)
 
 @onready var players: Node3D = $Players
 @onready var menu_camera: Camera3D = $MenuCamera
 
 var in_game := false
 var ui: CanvasLayer
+var ui_root: Control
 var menu_panel: CenterContainer
 var pause_panel: CenterContainer
 var name_edit: LineEdit
 var ip_edit: LineEdit
 var status_label: Label
 var hud_label: Label
+var hud_panel: PanelContainer
 
 
 func _ready() -> void:
-	menu_camera.look_at_from_position(Vector3(42, 34, 42), Vector3.ZERO)
+	menu_camera.look_at_from_position(Vector3(30, 14, 34), Vector3(4, 0, 6))
+	_add_ink_pass()
 	_build_ui()
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
@@ -119,7 +128,7 @@ func _add_player(id: int) -> void:
 func _start_game() -> void:
 	in_game = true
 	menu_panel.visible = false
-	hud_label.visible = true
+	hud_panel.visible = true
 	status_label.text = ""
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -130,7 +139,7 @@ func _back_to_menu(message: String) -> void:
 		p.queue_free()
 	menu_camera.current = true
 	pause_panel.visible = false
-	hud_label.visible = false
+	hud_panel.visible = false
 	menu_panel.visible = true
 	status_label.text = message
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -180,19 +189,27 @@ func _handle_cmdline() -> void:
 func _build_ui() -> void:
 	ui = CanvasLayer.new()
 	add_child(ui)
+	ui_root = Control.new()
+	ui_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_root.theme = _comic_theme()
+	ui.add_child(ui_root)
 
 	# menú principal
 	menu_panel = _centered_panel()
 	var box := menu_panel.get_child(0).get_child(0) as VBoxContainer
 	var title := Label.new()
-	title.text = "Pueblo Muerto"
-	title.add_theme_font_size_override("font_size", 48)
+	title.text = "PUEBLO MUERTO"
+	title.add_theme_font_override("font", FONT_TITLE)
+	title.add_theme_font_size_override("font_size", 54)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 	var lede := Label.new()
 	lede.text = "Registra las casas, come, bebe y aguanta otra noche. Mejor en compañía."
 	lede.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	lede.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lede.add_theme_font_override("font", FONT_TITLE)
+	lede.add_theme_font_size_override("font_size", 18)
 	box.add_child(lede)
 
 	name_edit = LineEdit.new()
@@ -215,7 +232,7 @@ func _build_ui() -> void:
 	status_label = Label.new()
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_label.modulate = Color(1, 0.8, 0.5)
+	status_label.add_theme_color_override("font_color", ACCENT)
 	box.add_child(status_label)
 
 	# pausa
@@ -223,32 +240,36 @@ func _build_ui() -> void:
 	pause_panel.visible = false
 	var pbox := pause_panel.get_child(0).get_child(0) as VBoxContainer
 	var ptitle := Label.new()
-	ptitle.text = "Menú"
-	ptitle.add_theme_font_size_override("font_size", 36)
+	ptitle.text = "EN PAUSA"
+	ptitle.add_theme_font_override("font", FONT_TITLE)
+	ptitle.add_theme_font_size_override("font_size", 40)
 	ptitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pbox.add_child(ptitle)
 	pbox.add_child(_button("Seguir jugando", func(): _set_paused(false)))
 	pbox.add_child(_button("Salir al menú principal", _on_leave_pressed))
 
 	# HUD
+	# HUD: un "bocadillo" de narrador arriba a la izquierda, como en los cómics
+	hud_panel = PanelContainer.new()
+	hud_panel.position = Vector2(16, 14)
+	hud_panel.visible = false
+	hud_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui_root.add_child(hud_panel)
 	hud_label = Label.new()
-	hud_label.position = Vector2(16, 12)
-	hud_label.add_theme_color_override("font_outline_color", Color.BLACK)
-	hud_label.add_theme_constant_override("outline_size", 6)
-	hud_label.visible = false
-	ui.add_child(hud_label)
+	hud_label.add_theme_font_size_override("font_size", 17)
+	hud_panel.add_child(hud_label)
 
 
 func _centered_panel() -> CenterContainer:
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui.add_child(center)
+	ui_root.add_child(center)
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(440, 0)
+	panel.custom_minimum_size = Vector2(460, 0)
 	center.add_child(panel)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 12)
+	box.add_theme_constant_override("separation", 14)
 	panel.add_child(box)
 	return center
 
@@ -258,3 +279,68 @@ func _button(text: String, callback: Callable) -> Button:
 	b.text = text
 	b.pressed.connect(callback)
 	return b
+
+
+## Plano a pantalla completa con el postproceso de tinta y papel.
+func _add_ink_pass() -> void:
+	var quad := MeshInstance3D.new()
+	quad.name = "InkPass"
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(2, 2)
+	quad.mesh = mesh
+	var mat := ShaderMaterial.new()
+	mat.shader = INK_SHADER
+	mat.render_priority = -100  # antes que los textos 3D (nombres)
+	quad.material_override = mat
+	quad.extra_cull_margin = 16384.0
+	quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(quad)
+
+
+## Estilo de viñeta: papel, borde de tinta grueso y sombra desplazada.
+func _comic_theme() -> Theme:
+	var th := Theme.new()
+	th.default_font = FONT_UI
+	th.default_font_size = 21
+
+	var panel := _comic_box(PAPER, 3, 6)
+	panel.content_margin_left = 22
+	panel.content_margin_right = 22
+	panel.content_margin_top = 16
+	panel.content_margin_bottom = 18
+	th.set_stylebox("panel", "PanelContainer", panel)
+
+	th.set_stylebox("normal", "Button", _comic_box(PAPER, 2, 3))
+	th.set_stylebox("hover", "Button", _comic_box(Color(0.98, 0.86, 0.55), 2, 3))
+	th.set_stylebox("pressed", "Button", _comic_box(INK, 2, 0))
+	th.set_stylebox("focus", "Button", _comic_box(Color(0, 0, 0, 0), 2, 0))
+	th.set_color("font_color", "Button", INK)
+	th.set_color("font_hover_color", "Button", INK)
+	th.set_color("font_focus_color", "Button", INK)
+	th.set_color("font_pressed_color", "Button", PAPER)
+
+	th.set_stylebox("normal", "LineEdit", _comic_box(Color(1, 0.99, 0.95), 2, 0))
+	th.set_stylebox("focus", "LineEdit", _comic_box(Color(0, 0, 0, 0), 3, 0))
+	th.set_color("font_color", "LineEdit", INK)
+	th.set_color("font_placeholder_color", "LineEdit", Color(INK, 0.45))
+	th.set_color("caret_color", "LineEdit", INK)
+
+	th.set_color("font_color", "Label", INK)
+	return th
+
+
+func _comic_box(bg: Color, border: int, shadow: int) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = INK
+	sb.set_border_width_all(border)
+	sb.shadow_color = INK
+	sb.shadow_size = 0
+	sb.shadow_offset = Vector2(shadow, shadow)
+	if shadow > 0:
+		sb.shadow_size = 1
+	sb.content_margin_left = 12
+	sb.content_margin_right = 12
+	sb.content_margin_top = 6
+	sb.content_margin_bottom = 6
+	return sb

@@ -40,6 +40,17 @@ godot --path godot -- --host --name=Miguel
 godot --path godot -- --join=127.0.0.1 --name=Invitada
 ```
 
+## Estilo visual: novela gráfica
+
+Todo se dibuja como un cómic de terror:
+
+- **Sombreado en 3 tonos** (`shaders/toon.gdshader`): luz, media luz y sombra planas, con la sombra azulada como tinta aguada.
+- **Postproceso de tinta y papel** (`shaders/ink_post.gdshader`): contornos negros que "tiemblan" como dibujados a mano, trama diagonal en las sombras, color apagado salvo el **rojo** (sangre, ojos de zombi), grano de papel y viñeta. Los valores se pueden ajustar en el material del nodo `InkPass`.
+- **Niebla color papel**: lo lejano se funde con el fondo, como en una viñeta.
+- **Tipografías**: Special Elite (títulos) y Barlow Condensed (interfaz), las mismas que la versión web.
+
+Requiere el renderizador **Forward+** (el de PC). El MSAA debe quedar desactivado: con él, Godot no pasa la profundidad al postproceso y desaparecen los contornos.
+
 ## Cómo está organizado
 
 ```
@@ -50,7 +61,10 @@ godot/
   scripts/network.gd   crear partida / unirse (autoload "Network")
   scripts/main.gd      menú, pausa y alta/baja de jugadores
   scripts/player.gd    movimiento en tercera persona
-  scripts/world.gd     el pueblo provisional hecho con cajas
+  scripts/human_figure.gd  figura humana articulada y animada por código
+  scripts/world.gd     el pueblo: casas con tejado, vallas, postes, coches, árboles
+  shaders/             sombreado de cómic y postproceso de tinta
+  fonts/               tipografías (licencias OFL / Apache incluidas)
 ```
 
 Cada jugador controla su propio personaje y el `MultiplayerSynchronizer` envía su posición a los demás. El pueblo se genera con una semilla fija, así que es idéntico en todos los equipos.
@@ -58,6 +72,7 @@ Cada jugador controla su propio personaje y el `MultiplayerSynchronizer` envía 
 ## Hoja de ruta
 
 - [x] Pueblo provisional con cajas, personaje en tercera persona
+- [x] Estilo novela gráfica (tinta, trama, papel) y figura humana animada
 - [x] Multijugador: crear partida / unirse
 - [ ] Hambre, sed, salud, sangrado, ciclo día/noche
 - [ ] Registrar muebles y coches (ya marcados en el grupo `contenedores`)

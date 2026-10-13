@@ -26,9 +26,14 @@ const SPAWN_POINT := Vector3(0, 0.2, 4)
 		if is_node_ready():
 			_apply_crouch()
 
-var pitch := -0.25
+const SKINS: Array[Color] = [Color(0.86, 0.66, 0.52), Color(0.68, 0.48, 0.34), Color(0.45, 0.31, 0.22), Color(0.92, 0.75, 0.62)]
+const HAIRS: Array[Color] = [Color(0.18, 0.12, 0.08), Color(0.08, 0.07, 0.07), Color(0.45, 0.3, 0.16), Color(0.6, 0.5, 0.35)]
 
-@onready var body_mesh: MeshInstance3D = $Body
+var pitch := -0.25
+var _last_pos := Vector3.ZERO
+var _ground_speed := 0.0
+
+@onready var figure: HumanFigure = $Figure
 @onready var name_label: Label3D = $NameLabel
 @onready var pivot: Node3D = $CameraPivot
 @onready var spring_arm: SpringArm3D = $CameraPivot/SpringArm
@@ -38,12 +43,15 @@ var pitch := -0.25
 func _enter_tree() -> void:
 	# El nodo se llama como el id de red de su dueño.
 	set_multiplayer_authority(name.to_int())
+	# aspecto fijo por jugador; la chaqueta lleva su color
+	var id := name.to_int()
+	var fig := $Figure as HumanFigure
+	fig.jacket = Network.color_for(id).darkened(0.25)
+	fig.skin = SKINS[absi(hash(id)) % SKINS.size()]
+	fig.hair = HAIRS[absi(hash(id * 7)) % HAIRS.size()]
 
 
 func _ready() -> void:
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Network.color_for(name.to_int())
-	body_mesh.material_override = mat
 	name_label.text = display_name
 	_apply_crouch()
 
@@ -58,6 +66,20 @@ func _ready() -> void:
 	else:
 		set_physics_process(false)
 		set_process_unhandled_input(false)
+	_last_pos = position
+
+
+func _process(delta: float) -> void:
+	# la velocidad se mide por el desplazamiento, así también anima a los remotos
+	var moved := Vector2(position.x - _last_pos.x, position.z - _last_pos.z).length() / maxf(delta, 1e-4)
+	_last_pos = position
+	_ground_speed = lerpf(_ground_speed, minf(moved, 9.0), clampf(delta * 10.0, 0.0, 1.0))
+	var airborne := is_multiplayer_authority() and not is_on_floor() and absf(velocity.y) > 1.0
+	figure.animate(delta, _ground_speed, crouching, airborne)
+	if is_multiplayer_authority():
+		var world := get_tree().get_first_node_in_group("world")
+		if world:
+			world.update_roofs(global_position)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -99,6 +121,5 @@ func _physics_process(delta: float) -> void:
 
 
 func _apply_crouch() -> void:
-	body_mesh.scale.y = 0.7 if crouching else 1.0
-	body_mesh.position.y = 0.63 if crouching else 0.9
-	pivot.position.y = 1.15 if crouching else 1.6
+	pivot.position.y = 1.15 if crouching else 1.55
+	name_label.position.y = 1.75 if crouching else 2.15

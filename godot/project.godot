@@ -72,5 +72,9 @@ pause={
 
 [rendering]
 
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=0
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality=0
+
 renderer/rendering_method="forward_plus"
 renderer/rendering_method.mobile="mobile"
