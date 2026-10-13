@@ -29,6 +29,8 @@ var log_box: VBoxContainer
 var info_label: Label
 var hurt: ColorRect
 var minimap: Control
+## mapa de papel a pantalla completa (M)
+var paper_map: PaperMap
 var inventory: PanelContainer
 var inv_list: VBoxContainer
 var inv_summary: Label
@@ -60,6 +62,8 @@ func bind_player(p: Node3D) -> void:
 	world = get_tree().get_first_node_in_group("world")
 	minimap.player = p
 	minimap.world = world
+	paper_map.player = p
+	paper_map.world = world
 	p.message.connect(toast)
 	if not world.night_changed.is_connected(_on_night_changed):
 		world.night_changed.connect(_on_night_changed)
@@ -86,7 +90,26 @@ func set_info(text: String) -> void:
 
 
 func is_blocking() -> bool:
-	return inventory.visible or death.visible
+	return inventory.visible or death.visible or paper_map.visible
+
+
+func toggle_map() -> void:
+	if player == null or player.dead:
+		return
+	if paper_map.visible:
+		close_map()
+		return
+	if inventory.visible:
+		close_panel()
+	paper_map.open()
+	Sfx.play("search", -8.0, 1.6)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_map() -> void:
+	paper_map.visible = false
+	if player and not player.dead:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func toggle_inventory() -> void:
@@ -565,6 +588,8 @@ func _build() -> void:
 
 	_build_inventory()
 	_build_death()
+	paper_map = PaperMap.new()
+	add_child(paper_map)
 
 
 func _build_inventory() -> void:

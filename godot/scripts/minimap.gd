@@ -94,6 +94,12 @@ func _draw() -> void:
 		else:
 			draw_rect(Rect2(p - Vector2(2.5, 2.5), Vector2(5, 5)), Color(0.98, 0.86, 0.55))
 			draw_rect(Rect2(p - Vector2(2.5, 2.5), Vector2(5, 5)), INK, false, 1.0)
+	# marcas del mapa (en el borde si están lejos)
+	for id in world.markers:
+		var m: Dictionary = world.markers[id]
+		var at: Vector2 = to_map.call(m.pos.x, m.pos.y)
+		at = at.clamp(Vector2(8, 8), size - Vector2(8, 8))
+		PaperMap.draw_marker(self, at, m.kind, m.color, 0.6)
 	# zombis cercanos
 	for z in get_tree().get_nodes_in_group("zombies"):
 		if z.dead or z.global_position.distance_to(player.global_position) > RANGE * 0.8:

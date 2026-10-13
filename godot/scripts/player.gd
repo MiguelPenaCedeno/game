@@ -100,6 +100,10 @@ var weight := 0.0
 var vehicle_target: Node3D
 var _look_yaw := 0.0
 var _look_idle := 0.0
+## cuadros del mapa por los que has pasado (para el mapa de papel)
+var explored := PackedByteArray()
+var _explore_t := 0.0
+const EXPLORE_RADIUS := 44.0
 
 ## mueble más cercano al que miras (-1 si ninguno)
 var interact_idx := -1
@@ -193,6 +197,10 @@ func _process(delta: float) -> void:
 	figure.animate(delta, _ground_speed, crouching, airborne)
 	if is_multiplayer_authority():
 		_world.update_roofs(global_position)
+		_explore_t -= delta
+		if _explore_t <= 0.0:
+			_explore_t = 0.5
+			_explore()
 		camera.fov = Settings.fov
 		# temblor de cámara
 		shake = maxf(0.0, shake - delta * 1.8)
@@ -821,7 +829,7 @@ func export_state() -> Dictionary:
 		"bleeding": bleeding, "infected": infected,
 		"inv": inv.duplicate(), "owned": owned.duplicate(), "weapon": weapon,
 		"kills": kills, "searched": searched, "alive_time": alive_time,
-		"spawn": spawn_point,
+		"spawn": spawn_point, "explored": explored,
 	}
 
 
@@ -832,6 +840,9 @@ func try_load() -> void:
 	_loaded = true
 	var d := SaveGame.load_character(Network.world_id, Network.player_name)
 	spawn_point = d.get("spawn", Vector3.INF)
+	var ex: PackedByteArray = d.get("explored", PackedByteArray())
+	if ex.size() == PaperMap.CELLS * PaperMap.CELLS:
+		explored = ex
 	if d.is_empty() or d.get("dead", false):
 		return  # nuevo, o habías muerto: tu mochila te espera en el cadáver
 	global_position = d.pos
@@ -1267,3 +1278,21 @@ func _apply_riding() -> void:
 	($Collision as CollisionShape3D).disabled = riding != ""
 	if is_multiplayer_authority():
 		spring_arm.spring_length = 5.2 if riding != "" else 2.7
+
+
+# ------------------------------------------------------------------ mapa
+## Marca como conocidos los cuadros del mapa que tienes alrededor.
+func _explore() -> void:
+	var cells: int = PaperMap.CELLS
+	if explored.size() != cells * cells:
+		explored.resize(cells * cells)
+	var cell: float = PaperMap.CELL
+	var c := Vector2i(int((global_position.x + WorldLayout.HALF) / cell), int((global_position.z + WorldLayout.HALF) / cell))
+	var r := int(ceil(EXPLORE_RADIUS / cell))
+	for z in range(c.y - r, c.y + r + 1):
+		for x in range(c.x - r, c.x + r + 1):
+			if x < 0 or z < 0 or x >= cells or z >= cells:
+				continue
+			var mid := Vector2((x + 0.5) * cell - WorldLayout.HALF, (z + 0.5) * cell - WorldLayout.HALF)
+			if mid.distance_to(Vector2(global_position.x, global_position.z)) <= EXPLORE_RADIUS + cell * 0.5:
+				explored[z * cells + x] = 1

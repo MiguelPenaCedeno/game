@@ -581,12 +581,14 @@ func send_state_to(peer: int) -> void:
 			empties.append(i)
 		if containers[i].get("gone", false):
 			gone.append(i)
-	_sync_state.rpc_id(peer, dyn, empties, gone, game_minutes)
+	_sync_state.rpc_id(peer, dyn, empties, gone, game_minutes, _markers_list())
 
 
 @rpc("authority", "call_remote", "reliable")
-func _sync_state(dyn: Array, empties: PackedInt32Array, gone: PackedInt32Array, minutes: float) -> void:
+func _sync_state(dyn: Array, empties: PackedInt32Array, gone: PackedInt32Array, minutes: float, marks: Array) -> void:
 	set_time(minutes)
+	for m in marks:
+		_add_marker(m[0], m[1], m[2], m[3], m[4])
 	for d in dyn:
 		if d[1] != containers.size():
 			continue
@@ -619,7 +621,7 @@ func export_state() -> Dictionary:
 		elif not c.loot.is_empty():
 			dyn.append({"kind": "bolsa", "pos": c.pos, "name": c.name, "corpse": c.corpse, "loot": c.loot.duplicate()})
 	return {"containers": conts, "dynamic": dyn, "gone": gone, "structures": structures.export_state(),
-		"minutes": game_minutes}
+		"minutes": game_minutes, "markers": _markers_list()}
 
 
 func import_state(d: Dictionary) -> void:
@@ -637,6 +639,8 @@ func import_state(d: Dictionary) -> void:
 		if i < _static_count:
 			_set_gone(i)
 	structures.import_state(d.get("structures", []))
+	for m in d.get("markers", []):
+		_add_marker(m[0], m[1], m[2], m[3], m[4])
 	# "bags" es el formato de antes de la Fase 2
 	var dyn: Array = d.get("dynamic", [])
 	for b in d.get("bags", []):
@@ -654,6 +658,7 @@ func import_state(d: Dictionary) -> void:
 
 func reset_containers() -> void:
 	set_time(START_MINUTES)
+	_clear_markers()
 	if structures:
 		structures.clear()
 	for c in containers.slice(_static_count):
@@ -719,6 +724,77 @@ func _set_gone(idx: int) -> void:
 	c.loot = {}
 	_apply_container_look(idx)
 	Sfx.play_at("hit_heavy", c.pos, 0.0, 0.6)
+
+
+# ------------------------------------------------------------------ marcas del mapa (compartidas)
+## id -> {pos: Vector2, kind, by, color}
+var markers := {}
+var _marker_seq := 0
+var _marker_nodes := {}
+const MARKER_WORDS := ["X", "¡PELIGRO!", "BOTÍN", "BASE"]
+
+
+@rpc("any_peer", "call_local", "reliable")
+func request_marker(pos: Vector2, kind: int, by: String, color: Color) -> void:
+	if not multiplayer.is_server():
+		return
+	if markers.size() >= 80:
+		_remove_marker.rpc(markers.keys().min())
+	_marker_seq += 1
+	_add_marker.rpc(_marker_seq, pos, kind, by, color)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func request_remove_marker(id: int) -> void:
+	if multiplayer.is_server() and markers.has(id):
+		_remove_marker.rpc(id)
+
+
+@rpc("authority", "call_local", "reliable")
+func _add_marker(id: int, pos: Vector2, kind: int, by: String, color: Color) -> void:
+	if markers.has(id):
+		return
+	markers[id] = {"pos": pos, "kind": kind, "by": by, "color": color}
+	_marker_seq = maxi(_marker_seq, id)
+	# en el mundo: una palabra flotando, siempre del mismo tamaño en pantalla
+	var l := Label3D.new()
+	l.text = MARKER_WORDS[clampi(kind, 0, 3)]
+	l.font = FONT_WORDS
+	l.font_size = 64
+	l.outline_size = 18
+	l.modulate = color.lightened(0.2)
+	l.outline_modulate = Color(0.07, 0.065, 0.075)
+	l.fixed_size = true
+	l.pixel_size = 0.0007
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.render_priority = 8
+	l.visibility_range_end = 260.0
+	l.position = Vector3(pos.x, 3.0, pos.y)
+	_fx.add_child(l)
+	_marker_nodes[id] = l
+
+
+@rpc("authority", "call_local", "reliable")
+func _remove_marker(id: int) -> void:
+	markers.erase(id)
+	if _marker_nodes.has(id):
+		_marker_nodes[id].queue_free()
+		_marker_nodes.erase(id)
+
+
+func _clear_markers() -> void:
+	for id in markers.keys():
+		_remove_marker(id)
+	_marker_seq = 0
+
+
+func _markers_list() -> Array:
+	var out := []
+	for id in markers:
+		var m: Dictionary = markers[id]
+		out.append([id, m.pos, m.kind, m.by, m.color])
+	return out
 
 
 # ------------------------------------------------------------------ fuego (molotov)

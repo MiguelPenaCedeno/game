@@ -181,6 +181,7 @@ func _test_solo() -> void:
 	await _test_building(p, w)
 	await _test_big_map(p, w)
 	await _test_vehicles(p, w)
+	await _test_paper_map(p, w)
 
 	# pausa
 	main._set_paused(true)
@@ -224,7 +225,11 @@ func _test_host() -> void:
 		var p0: Vector3 = dv.global_position
 		check(await _wait_until(func(): return dv.global_position.distance_to(p0) > 2.0, 10.0), "y lo veo moverse (%.1f m)" % dv.global_position.distance_to(p0))
 		check(await _wait_until(func(): return dv.driver == 0, 15.0), "y bajarse")
-	# ella cae al suelo: voy y la levanto
+	check(await _wait_until(func(): return main.world.markers.size() > 0, 15.0), "veo la marca que puso en el mapa")
+	# ella cae al suelo: voy y la levanto (sin zombis alrededor que la vuelvan a tumbar)
+	main._zombie_timer.stop()
+	for z in main.zombies.get_children():
+		z.queue_free()
 	var guest: Node = null
 	for pl in main.players.get_children():
 		if pl.name != "1":
@@ -297,6 +302,8 @@ func _test_client() -> void:
 	await _wait(1.0)
 	p.leave_vehicle()
 	check(await _wait_until(func(): return v.driver == 0 and not v.is_multiplayer_authority(), 4.0), "me bajo y el coche vuelve al anfitrión")
+	main.world.request_marker.rpc_id(1, Vector2(30, 30), 2, "Invitada", Color.RED)
+	check(await _wait_until(func(): return main.world.markers.size() > 0, 5.0), "marco un sitio en el mapa")
 	# me tumban: caigo al suelo (no muero) porque el anfitrión sigue en pie
 	for z in main.zombies.get_children():
 		z.set_process(false)
@@ -555,6 +562,8 @@ func _test_vehicles(p: Node, w: Node) -> void:
 	check(moved > 5.0, "acelero y avanzo (%.1f m, %d km/h)" % [moved, roundi(absf(v.speed) * 3.6)])
 	check(v.fuel < 10.0, "gasta gasolina (%.2f l)" % v.fuel)
 	check(p.global_position.distance_to(v.global_position) < 2.0, "voy dentro")
+	await get_tree().physics_frame
+	check(p.spring_arm.get_hit_length() > 4.0, "la cámara se aleja para ver el coche (%.1f m)" % p.spring_arm.get_hit_length())
 	check(p.noise > 15.0, "el motor hace ruido (%.0f m)" % p.noise)
 	# atropellar
 	var z: Node = null
@@ -592,6 +601,32 @@ func _test_vehicles(p: Node, w: Node) -> void:
 		if (d.pos as Vector3).distance_to(v.global_position) < 1.0 and is_equal_approx(d.fuel, v.fuel):
 			found = true
 	check(found, "el coche se guarda donde lo dejé y con su gasolina")
+
+
+# ------------------------------------------------------------------ mapa de papel (Fase 4)
+func _test_paper_map(p: Node, w: Node) -> void:
+	print("-- mapa de papel --")
+	await _wait(0.6)
+	var seen := 0
+	for b in p.explored:
+		seen += b
+	check(seen > 10, "lo que he recorrido queda explorado (%d cuadros)" % seen)
+	main.hud.toggle_map()
+	check(main.hud.paper_map.visible and main.hud.paper_map._base != null, "M abre el mapa de papel")
+	await _wait(0.2)
+	main.hud.paper_map._place(Vector2(p.global_position.x + 10, p.global_position.z))
+	check(await _wait_until(func(): return w.markers.size() == 1, 3.0), "pongo una marca")
+	var id: int = w.markers.keys()[0]
+	check(w._marker_nodes.has(id), "y se ve en el mundo")
+	main.save_now()
+	var saved := SaveGame.load_world()
+	check(saved.get("markers", []).size() == 1, "las marcas se guardan")
+	var ch := SaveGame.load_character(Network.world_id, Network.player_name)
+	check((ch.get("explored", PackedByteArray()) as PackedByteArray).size() == PaperMap.CELLS * PaperMap.CELLS, "y lo explorado también")
+	main.hud.paper_map._remove_near(main.hud.paper_map.world_to_screen(w.markers[id].pos))
+	check(await _wait_until(func(): return w.markers.is_empty(), 3.0), "clic derecho la quita")
+	main.hud.close_map()
+	check(not main.hud.paper_map.visible, "y se cierra")
 
 
 # ------------------------------------------------------------------ construcción (Fase 3)

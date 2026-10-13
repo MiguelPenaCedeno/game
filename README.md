@@ -31,13 +31,18 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
 | Clic izquierdo | golpear o disparar |
 | E | registrar muebles y maleteros · mantener junto a un compañero caído para levantarlo |
 | Q | cambiar de arma |
-| 1 · 2 · 3 | comer (el guiso primero) · beber · vendarte |
+| 1 · 2 · 3 | comer (el guiso primero) · beber · vendarte (con infección, primero los antibióticos) |
 | 4 | lanzar un cóctel molotov |
 | R / clic derecho | girar / cancelar al colocar una estructura |
 | E (mirando lo construido) | abrir/cerrar puertas · dormir en la cama · reparar (1 tablón o chatarra) |
 | R (mirando lo construido) | quitarlo (devuelve la mitad del material) |
 | F | linterna (de noche los zombis te ven de más lejos si la llevas encendida) |
 | Tab | mochila y **fabricar** (ver peso, soltar cosas, recetas) |
+| M | **mapa de papel** (clic: marcar · clic derecho: borrar · rueda: zoom · 1-4: tipo de marca) |
+| E (junto a un coche) | subir al volante (o de copiloto si ya conduce alguien) |
+| R (junto a un coche) | echar un bidón de gasolina |
+| W/S · A/D · Espacio (al volante) | acelerar y frenar · girar · freno de mano |
+| F (al volante) | faros |
 | E (con un mueble abierto) | cerrar la ventana del mueble |
 | Esc | menú |
 
@@ -62,8 +67,27 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
   - en el banco: *muro de madera* o *de chatarra* (el doble de resistente), *puerta* que se abre y cierra con E, *trampa de pinchos* que hiere y frena a los zombis (se desgasta);
   - *cama* (a mano): duerme en ella con E y reaparecerás ahí al morir.
   Los muros y puertas encajan en una rejilla de 1 m. Cada pieza tiene vida: los zombis que se topan con ella la golpean hasta derribarla (se oscurece al dañarse). Repárala con E. Los zombis no "ven" lo construido al buscar camino: van directos y chocan.
-- **Hordas:** cada 7 noches (el reloj indica cuántos días faltan). Al atardecer avisa; al caer la noche entra una horda por un borde del mapa y va hacia vuestra base (el centro de lo construido, o donde estéis si no hay nada). De noche, además, las hogueras atraen a los zombis cercanos.
+- **Hordas:** cada 7 noches (el reloj indica cuántos días faltan). Al atardecer avisa; al caer la noche una horda sale del bosque y va hacia vuestra base (el centro de lo construido, o donde estéis si no hay nada). De noche, además, las hogueras atraen a los zombis cercanos.
 - **Molotov:** se lanza con 4 hacia donde miras y deja 7 s un charco de fuego que quema zombis… y a ti si lo pisas.
+- **Mundo grande** (640 × 640 m): el pueblo en el centro con su **supermercado, comisaría,
+  hospital, iglesia y parque**; cuatro carreteras salen hacia el bosque con casas sueltas,
+  **dos gasolineras**, **cuatro granjas**, un **control militar** abandonado y una **cabaña de
+  cazador** escondida en el bosque. Hay casas de **dos plantas** (la escalera sube a los
+  dormitorios; desde abajo se oculta el piso de arriba para que veas el interior).
+  El mapa se construye por zonas de 80 × 80 m alrededor de cada jugador, en otro hilo, y se
+  quita lo que queda lejos; cada zona tiene su propia navegación para los zombis. Los zombis
+  aparecen alrededor de cada jugador (más en el pueblo que en el campo) y desaparecen al alejaros.
+- **Botín por lugares:** estanterías del súper (comida, agua), botiquines del hospital
+  (vendas y **antibióticos**, que curan la infección), taquillas y **armero** de la comisaría,
+  cajas de munición del control militar, cajas de herramientas y arcones de las granjas, y
+  **bidones de gasolina** en gasolineras y graneros.
+- **Vehículos:** coches y furgonetas que todavía arrancan (en el pueblo, gasolineras, granjas
+  y el control militar). Gastan gasolina (un bidón echa 6 l; con 40 l haces unos 3 km),
+  hacen ruido que atrae a los zombis, los **atropellan**, se abollan al chocar y se guardan
+  con la partida. Uno conduce y otro puede ir de **copiloto**. En red manda quien conduce.
+- **Mapa de papel (M):** todo el condado dibujado como en un cuaderno, tapado donde todavía no
+  has estado. Las **marcas** (aquí, peligro, botín, base) se comparten con tu compañero, se
+  guardan con la partida y aparecen en el minimapa y flotando en el mundo.
 - **Minimapa** arriba a la derecha: gira contigo. Cuadraditos amarillos = muebles sin registrar, puntos rojos = zombis cercanos, flechas de color = tus compañeros.
 
 ## Jugar online
@@ -97,14 +121,36 @@ guarda el mundo (muebles, bultos, cadáveres) y cada jugador su personaje, en
 marca *Empezar de cero* en el menú para borrarla. Si al morir llevabas cosas, tu mochila
 queda junto al cadáver (cuadro rojo en el minimapa).
 
+> La Fase 4 cambió el mapa entero: las partidas guardadas de versiones anteriores no se
+> pueden continuar (el juego empieza una nueva).
+
+## Lugares hechos a mano
+
+Los sitios especiales del mapa se pueden diseñar en el editor de Godot, en `godot/lugares/`
+(ahí están `control_militar.tscn` y `cabana_cazador.tscn` como ejemplo):
+
+1. Crea una escena 3D nueva y llama al nodo raíz como quieras que salga en el mapa
+   (por ejemplo *Gasolinera abandonada*).
+2. Monta el sitio con nodos **MeshInstance3D** (cajas, cilindros, prismas…) con un
+   **StandardMaterial3D**: solo se usa su color, el juego lo dibuja con tinta de cómic.
+   Para que algo choque, mete **CollisionShape3D** dentro de un **StaticBody3D**.
+3. Para muebles registrables añade **Marker3D** llamados `Mueble_<tipo>` (por ejemplo
+   `Mueble_armero`, `Mueble_botiquin`, `Mueble_caja_municion`; los tipos son los archivos de
+   `data/containers/`). El frente del mueble mira hacia el eje Z positivo (azul) del marcador.
+4. Un **Marker3D** llamado `Vehiculo` deja un coche que arranca. Un nodo `Tejado` se oculta
+   cuando entras.
+5. Añade la escena a la lista `PREFABS` de `scripts/world_layout.gd` con su posición y giro.
+
 ## Pruebas automáticas
 
 ```
 godot/tests/run_all.sh /ruta/a/godot
 ```
 
-Prueba una partida en solitario (registrar, peso, bultos, cadáver, guardado, combate, pausa)
-y una partida con dos jugadores conectados. GitHub las ejecuta en cada cambio.
+Prueba una partida en solitario (registrar, peso, bultos, cadáver, guardado, combate,
+fabricar, construir, hordas, carga por zonas, casas de dos plantas, conducir, mapa, pausa)
+y una partida con dos jugadores conectados (muebles, estructuras, conducir un coche del
+anfitrión, marcas compartidas, levantar al compañero). GitHub las ejecuta en cada cambio.
 
 ## Estilo visual: novela gráfica
 
@@ -142,12 +188,17 @@ godot/
   data/containers/     un .tres por mueble: tiempo de registro, botín y lo que da al desmontarlo
   data/recipes/        un .tres por receta: dónde se fabrica, ingredientes y resultado
   tests/               pruebas automáticas
-  scripts/world.gd     el pueblo: casas con tejado, vallas, postes, coches, árboles
+  scripts/world.gd     el mundo: carga por zonas, reloj, muebles, marcas, fuego y efectos
+  scripts/world_layout.gd  el plano: calles, casas, lugares, granjas, bosque (solo datos)
+  scripts/tile_builder.gd  construye una zona del plano (casas, coches, árboles…)
+  scripts/vehicle.gd   coches y furgonetas que se conducen
+  scripts/paper_map.gd mapa de papel (M)
+  lugares/             lugares hechos a mano en el editor (.tscn)
   shaders/             sombreado de cómic y postproceso de tinta
   fonts/               tipografías (licencias OFL / Apache incluidas)
 ```
 
-Cada jugador controla su propio personaje y el `MultiplayerSynchronizer` envía su posición a los demás. El pueblo se genera con una semilla fija, así que es idéntico en todos los equipos.
+Cada jugador controla su propio personaje y el `MultiplayerSynchronizer` envía su posición a los demás. El mapa se planifica con una semilla fija, así que es idéntico en todos los equipos.
 
 ## Hoja de ruta
 
@@ -165,7 +216,8 @@ mapa **semiprocedural con lugares hechos a mano**, y al morir **la mochila queda
 - [x] **Fase 2 · Fabricación:** desmontar muebles, materiales, banco de trabajo, hoguera, caja, recetas, reparar, molotov
 - [x] **Fase 3 · Refugio:** barricadas, muros, puertas, empalizadas y trampas con vida, cama para
   reaparecer, hordas cada 7 noches
-- [ ] **Fase 4 · Mundo grande:** mapa por zonas con lugares hechos a mano, casas de dos pisos,
-  vehículos, mapa de papel
+- [x] **Fase 4 · Mundo grande:** mapa de 640 × 640 m por zonas, supermercado, comisaría,
+  hospital, gasolineras, granjas, lugares hechos en el editor, casas de dos pisos,
+  vehículos con gasolina y copiloto, mapa de papel con marcas compartidas
 - [ ] **Fase 5 · Profundidad:** ropa y mochilas, habilidades, más zombis, granja y caza, historia
 - [ ] **Fase 6 · Pulido:** Android, mando, dificultad configurable

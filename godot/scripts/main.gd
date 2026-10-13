@@ -90,11 +90,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause"):
 		if settings_panel.visible:
 			_close_settings()
+		elif hud.paper_map.visible:
+			hud.close_map()
 		elif hud.inventory.visible:
 			hud.close_panel()
 		elif not hud.death.visible:
 			_set_paused(not pause_panel.visible)
+	elif event.is_action_pressed("map") and not pause_panel.visible:
+		hud.toggle_map()
 	elif event.is_action_pressed("inventory") and not pause_panel.visible:
+		if hud.paper_map.visible:
+			hud.close_map()
 		hud.toggle_inventory()
 	elif event.is_action_pressed("interact") and hud.inventory.visible:
 		hud.close_panel()
