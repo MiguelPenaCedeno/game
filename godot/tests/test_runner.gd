@@ -468,7 +468,13 @@ func _test_big_map(p: Node, w: Node) -> void:
 			bidon = i
 	check(bidon >= 0 and w.containers[bidon].node != null, "hay bidones de gasolina en la gasolinera")
 	check(await _wait_until(func(): return w.nav_ready_at(far), 10.0), "la zona nueva tiene navegación para los zombis")
-	var spawned: Node = main._spawn_zombie(far)
+	# como el relleno de zombis: si las zonas de alrededor aún no tienen navegación, se reintenta
+	var spawned: Node = null
+	for i in 20:
+		spawned = main._spawn_zombie(far)
+		if spawned:
+			break
+		await _wait(0.5)
 	check(spawned != null, "aparecen zombis alrededor (%s)" % (str(spawned.global_position) if spawned else "-"))
 	# volver: lo desmontado sigue desmontado
 	p.global_position = Vector3(0, 0.2, 4)
