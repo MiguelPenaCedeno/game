@@ -164,6 +164,8 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
+	# la niebla lo tapa todo a unos 85 m: lo que quede más lejos no se dibuja
+	camera.far = 110.0
 	_build_torch()
 	figure.footstep.connect(func(soft: bool):
 		Sfx.play_at("step_soft" if soft else "step", global_position, -4.0 if soft else 0.0, 1.0, 22.0))

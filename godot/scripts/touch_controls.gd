@@ -52,10 +52,12 @@ func active() -> bool:
 
 
 func _process(_delta: float) -> void:
-	visible = active()
+	var on := active()
+	if on != visible:
+		visible = on
+		queue_redraw()
 	if not visible and (_stick_on or not _touches.is_empty()):
 		_release_all()
-	queue_redraw()
 
 
 ## Las coordenadas de los botones están pensadas para 1280x720; se ajustan al tamaño real.
@@ -76,6 +78,9 @@ func _button_at(p: Vector2) -> int:
 func _input(event: InputEvent) -> void:
 	if not active():
 		return
+	# solo se redibuja cuando cambia algo (un dedo que entra, se mueve o sale)
+	if event is InputEventScreenTouch or event is InputEventScreenDrag:
+		queue_redraw()
 	if event is InputEventScreenTouch:
 		var t := event as InputEventScreenTouch
 		var p := t.position

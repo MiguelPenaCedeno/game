@@ -71,6 +71,8 @@ var _zombie_timer: Timer
 func _ready() -> void:
 	add_to_group("main")
 	menu_camera.look_at_from_position(Vector3(30, 14, 34), Vector3(4, 0, 6))
+	# más allá no hay nada cargado (y la niebla ya lo tapa): no se dibuja
+	menu_camera.far = 170.0
 	# el menú y la interfaz siguen vivos en pausa; el mundo no
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	for n in [world, players, zombies]:
@@ -1005,6 +1007,7 @@ func _build_settings() -> void:
 	_check(grid, "Sincronización vertical", "vsync")
 	_slider(grid, "Resolución 3D", "render_scale", 0.5, 1.0, 0.05, func(v): return "%d%%" % roundi(v * 100))
 	_option(grid, "Sombras", "shadows", ["Sin sombras", "Bajas", "Altas"])
+	_fps_option(grid)
 	_slider(grid, "Grosor de la tinta", "line_width", 0.6, 2.5, 0.1, func(v): return "%.1f" % v)
 	_slider(grid, "Trama en sombras", "hatching", 0.0, 1.0, 0.05, func(v): return "%d%%" % roundi(v * 100))
 	_slider(grid, "Grano del papel", "grain", 0.0, 0.2, 0.01, func(v): return "%d%%" % roundi(v * 500))
@@ -1048,6 +1051,21 @@ func _check(grid: GridContainer, text: String, key: String) -> void:
 	cb.button_pressed = Settings.get(key)
 	cb.toggled.connect(func(on): Settings.set_value(key, on))
 	grid.add_child(cb)
+	grid.add_child(Control.new())
+
+
+## Imágenes por segundo: menos = el móvil se calienta y gasta menos batería.
+const FPS_CHOICES := [30, 45, 60, 0]
+
+
+func _fps_option(grid: GridContainer) -> void:
+	_label(grid, "Imágenes por segundo")
+	var ob := OptionButton.new()
+	for f in FPS_CHOICES:
+		ob.add_item("Sin límite" if f == 0 else str(f))
+	ob.selected = maxi(0, FPS_CHOICES.find(Settings.max_fps))
+	ob.item_selected.connect(func(i): Settings.set_value("max_fps", FPS_CHOICES[i]))
+	grid.add_child(ob)
 	grid.add_child(Control.new())
 
 

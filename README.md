@@ -25,8 +25,9 @@ vez). Las versiones nuevas se instalan encima sin perder la partida.
   todo hacia delante, corres); arrastra en la mitad derecha para mirar. Botones: GOLPE, USAR,
   SALTO, AGACH., ARMA, LUZ y, arriba, 1-4, MOCHILA, MAPA y pausa. En *Ajustes* puedes forzarlos
   o quitarlos (por ejemplo, si juegas con mando en el móvil).
-- El móvil usa una versión más ligera de la tinta (sin el contorno por normales), menos
-  resolución 3D y sombras bajas. Se cambia en *Ajustes*.
+- El móvil usa una versión más ligera de la tinta (sin el contorno por normales), 60 % de
+  resolución 3D, sombras bajas y 30 imágenes por segundo (se calienta y gasta mucho menos).
+  Todo se cambia en *Ajustes* ("Imágenes por segundo": 30, 45, 60 o sin límite).
 - Online igual que en PC: con Tailscale instalado en el móvil (app oficial) usa la IP `100.x`.
 
 ### Si el juego se cierra solo en el móvil

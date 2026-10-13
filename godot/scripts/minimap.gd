@@ -20,8 +20,14 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
-func _process(_delta: float) -> void:
-	if is_visible_in_tree():
+var _redraw_t := 0.0
+
+
+## Se redibuja unas 15 veces por segundo (cada fotograma es trabajo de más para el móvil).
+func _process(delta: float) -> void:
+	_redraw_t += delta
+	if is_visible_in_tree() and _redraw_t >= 0.066:
+		_redraw_t = 0.0
 		queue_redraw()
 
 
