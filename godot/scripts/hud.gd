@@ -57,6 +57,8 @@ func bind_player(p: Node3D) -> void:
 	minimap.player = p
 	minimap.world = world
 	p.message.connect(toast)
+	if not world.night_changed.is_connected(_on_night_changed):
+		world.night_changed.connect(_on_night_changed)
 	p.died.connect(_on_died)
 	if not world.container_opened.is_connected(open_container):
 		world.container_opened.connect(open_container)
@@ -66,6 +68,13 @@ func bind_player(p: Node3D) -> void:
 				_refresh_inventory.call_deferred())
 	death.visible = false
 	inventory.visible = false
+
+
+func _on_night_changed(is_night: bool) -> void:
+	if is_night:
+		toast("Cae la noche. Los muertos se mueven más rápido. (F: linterna)", true)
+	else:
+		toast("Amanece. Día %d." % world.day_number())
 
 
 func set_info(text: String) -> void:
@@ -168,8 +177,8 @@ func _process(_delta: float) -> void:
 		m.append("Sediento")
 	moodles.text = " · ".join(m)
 	moodles.visible = not m.is_empty()
-	var t := int(player.alive_time)
-	clock.text = "Sobrevives %d:%02d" % [t / 60, t % 60]
+	clock.text = world.clock_text()
+	Sfx.set_ambience(1.0 - world.daylight, clampf((30.0 - player.hp) / 30.0, 0.0, 1.0) if not player.dead else 0.0)
 
 	slots.comida.text = str(player.inv.comida)
 	slots.agua.text = str(player.inv.agua)
@@ -186,16 +195,27 @@ func _process(_delta: float) -> void:
 	# aviso de registrar
 	prompt_panel.visible = false
 	progress.visible = not player.search.is_empty()
-	if progress.visible:
+	if player.downed:
+		progress.visible = true
+		progress.value = player.bleed_out / player.BLEED_OUT_TIME * 100.0
+		prompt.text = "EN EL SUELO · %d s · espera a que te levanten" % ceili(player.bleed_out)
+		prompt_panel.visible = true
+	elif progress.visible:
 		progress.value = player.search.t / player.search.dur * 100.0
-		prompt.text = "Registrando %s…" % world.containers[player.search.idx].name.to_lower()
+		if player.search.has("revive"):
+			prompt.text = "Levantando a %s…" % player.search.revive.display_name
+		else:
+			prompt.text = "Registrando %s…" % world.containers[player.search.idx].name.to_lower()
+		prompt_panel.visible = true
+	elif player.revive_target and not player.dead:
+		prompt.text = "[E] Levantar a %s" % player.revive_target.display_name
 		prompt_panel.visible = true
 	elif player.interact_idx >= 0 and not player.dead:
 		var c: Dictionary = world.containers[player.interact_idx]
 		prompt.text = ("%s (vacío)" % c.name) if c.empty else ("[E] Registrar %s" % c.name.to_lower())
 		prompt_panel.visible = true
 
-	hurt.color.a = 0.0 if player.dead else minf(0.3, player.hurt_flash()) + (0.1 if player.hp < 25 else 0.0)
+	hurt.color.a = 0.0 if player.dead else minf(0.3, player.hurt_flash()) + (0.1 if player.hp < 25 else 0.0) + (0.15 if player.downed else 0.0)
 
 	if is_container_open():
 		# te alejaste del mueble: se cierra

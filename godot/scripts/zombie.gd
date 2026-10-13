@@ -6,8 +6,14 @@ extends CharacterBody3D
 ## quien tienen delante. Agachado eres más difícil de ver y no haces ruido.
 
 const GRAVITY := 16.0
+## distancia a la que ven: de día, de noche y de noche si llevas linterna.
+## Agachado te ven a menos de la mitad.
 const SIGHT := 15.0
-const SIGHT_CROUCH := 6.0
+const SIGHT_NIGHT := 9.0
+const SIGHT_TORCH := 17.0
+const CROUCH_SIGHT := 0.45
+## de noche se mueven más rápido
+const NIGHT_SPEED := 1.3
 const ATTACK_RANGE := 1.35
 const LAYER_WORLD := 1
 
@@ -37,6 +43,9 @@ var _ground_speed := 0.0
 var _dead_t := 0.0
 var _path_target := Vector3.INF
 var _anim_skip := false
+var _stagger_t := 0.0
+var _groan_t := randf_range(2.0, 10.0)
+var _world: Node
 
 @onready var figure: HumanFigure = $Figure
 @onready var agent: NavigationAgent3D = $Agent
@@ -60,7 +69,9 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
+	_world = get_tree().get_first_node_in_group("world")
 	_last_pos = position
+	figure.footstep.connect(func(_soft): Sfx.play_at("step_soft", global_position, -6.0, 0.8, 18.0))
 	if multiplayer.is_server():
 		hp = randf_range(4.5, 6.2)
 		speed = randf_range(1.05, 1.85) * (1.8 if randf() < 0.1 else 1.0)
@@ -91,6 +102,11 @@ func _process(delta: float) -> void:
 			queue_free()
 		return
 	_ground_speed = lerpf(_ground_speed, minf(moved, 6.0), clampf(delta * 8.0, 0.0, 1.0))
+	# gruñidos: cada equipo los genera por su cuenta, no hace falta enviarlos
+	_groan_t -= delta
+	if _groan_t <= 0.0:
+		_groan_t = randf_range(3.0, 6.0) if _ground_speed > 2.0 else randf_range(6.0, 14.0)
+		Sfx.play_at("groan%d" % (randi() % 3), global_position + Vector3.UP * 1.6, -2.0, 1.0, 28.0)
 	# lejos de la cámara: sin sombra y animación a medio ritmo
 	var cam := get_viewport().get_camera_3d()
 	var far := cam != null and cam.global_position.distance_squared_to(global_position) > 28.0 * 28.0
@@ -112,9 +128,13 @@ func _physics_process(delta: float) -> void:
 		_sense()
 
 	var dest := target_pos
-	var spd := speed * 0.45
+	var night_k := NIGHT_SPEED if _world and _world.night else 1.0
+	var spd := speed * 0.45 * night_k
+	_stagger_t -= delta
 	if state == "chase":
-		spd = speed * (1.6 if memory > 0 else 1.1)
+		spd = speed * (1.6 if memory > 0 else 1.1) * night_k
+		if _stagger_t > 0.0:
+			spd = 0.0
 		if target_player and is_instance_valid(target_player):
 			var d := global_position.distance_to(target_player.global_position)
 			if d < ATTACK_RANGE:
@@ -169,8 +189,15 @@ func _sense() -> void:
 			continue
 		var to: Vector3 = p.global_position - global_position
 		var d := to.length()
+		# a los caídos los persiguen menos (prefieren a quien sigue en pie)
+		if p.downed:
+			d *= 1.8
 		var heard: bool = d < p.noise
-		var sight := SIGHT_CROUCH if p.crouching else SIGHT
+		var sight := SIGHT
+		if _world and _world.night:
+			sight = SIGHT_TORCH if p.flashlight else SIGHT_NIGHT
+		if p.crouching:
+			sight *= CROUCH_SIGHT
 		var seen := d < sight and (d < 2.5 or forward.dot(to.normalized()) > 0.3) and _line_of_sight(p.global_position)
 		if (heard or seen) and d < best_d:
 			best_d = d
@@ -202,12 +229,14 @@ func _try_attack() -> void:
 
 ## Lo llama el jugador que golpea o dispara.
 @rpc("any_peer", "call_local", "reliable")
-func damage(amount: float, knock: Vector3) -> void:
+func damage(amount: float, knock: Vector3, kind := "puños") -> void:
 	if not multiplayer.is_server() or dead:
 		return
 	hp -= amount
 	velocity += knock * 3.0
-	_fx_hit.rpc(global_position, false)
+	_stagger_t = 0.45 if kind != "puños" else 0.25
+	if hp > 0.0:
+		_fx_hit.rpc(global_position, false, kind)
 	# el golpe le hace fijarse en quien le pegó
 	var sender := multiplayer.get_remote_sender_id()
 	var attacker := get_tree().current_scene.get_node_or_null("Players/%d" % (sender if sender != 0 else 1))
@@ -218,16 +247,27 @@ func damage(amount: float, knock: Vector3) -> void:
 		memory = 6.0
 	if hp <= 0.0:
 		dead = true
-		_fx_hit.rpc(global_position, true)
+		_fx_hit.rpc(global_position, true, kind)
 		if attacker:
 			attacker.add_kill.rpc_id(attacker.name.to_int())
 
 
+## Golpe visto por todos: sangre, sonido y onomatopeya.
 @rpc("authority", "call_local", "reliable")
-func _fx_hit(pos: Vector3, big: bool) -> void:
-	var world := get_tree().get_first_node_in_group("world")
-	if world:
-		world.spawn_blood(pos, 1.5 if big else 0.7)
+func _fx_hit(pos: Vector3, big: bool, kind: String) -> void:
+	if _world == null:
+		return
+	_world.spawn_blood(pos, 1.5 if big else 0.7)
+	if big:
+		Sfx.play_at("splat", pos, 2.0)
+		_world.spawn_word(pos, "muerte", Color(0.75, 0.08, 0.05), 1.3)
+		var cam := get_viewport().get_camera_3d()
+		if cam and cam.global_position.distance_to(pos) < 12.0:
+			get_tree().call_group("main", "impact", 0.55)
+	if kind != "pistola":
+		Sfx.play_at("hit" if kind == "puños" else "hit_heavy", pos, 0.0 if kind == "puños" else 3.0)
+		if not big:
+			_world.spawn_word(pos, kind, Color(0.98, 0.95, 0.85), 0.9 if kind == "puños" else 1.1)
 
 
 func _on_died() -> void:

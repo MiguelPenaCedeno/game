@@ -7,6 +7,9 @@ extends Node3D
 
 const TOON := preload("res://shaders/toon.gdshader")
 
+## un pie toca el suelo (para los pasos); `soft` si va agachado
+signal footstep(soft: bool)
+
 @export var skin := Color(0.82, 0.62, 0.48)
 @export var jacket := Color(0.25, 0.36, 0.45)
 @export var shirt := Color(0.75, 0.72, 0.65)
@@ -256,7 +259,10 @@ func animate(delta: float, speed: float, crouching: bool, airborne := false) -> 
 		return
 	var amt := clampf(speed / 3.4, 0.0, 1.9)
 	var running := amt > 1.25
+	var prev_sin := sin(_phase)
 	_phase = fmod(_phase + delta * (2.0 + speed * 1.55), TAU * 4.0)
+	if amt > 0.15 and not airborne and signf(sin(_phase)) != signf(prev_sin):
+		footstep.emit(crouching)
 	_breath += delta * 1.7
 	var s := sin(_phase)
 	var k := clampf(delta * 12.0, 0.0, 1.0)

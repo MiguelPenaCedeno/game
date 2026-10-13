@@ -67,6 +67,22 @@ var _fx: Node3D
 var _fx_items: Array[Node3D] = []
 var _bags: Node3D
 var _sun: DirectionalLight3D
+var _env: Environment
+
+# ------------------------------------------------------------------ reloj
+## minutos de juego desde el inicio (día 1, 08:00). 1 s real = 4 min de juego:
+## un día entero dura 6 minutos, como en la versión web.
+const MIN_PER_SEC := 4.0
+const START_MINUTES := 8.0 * 60.0
+const NIGHT_PAPER := Color(0.12, 0.13, 0.18)
+const DUSK := Color(0.62, 0.45, 0.36)
+var game_minutes := START_MINUTES
+var clock_running := false
+## 0 = noche cerrada, 1 = pleno día
+var daylight := 1.0
+var night := false
+var _sync_t := 0.0
+signal night_changed(is_night: bool)
 ## cuántos muebles vienen del mapa; los de después son bultos y mochilas
 var _static_count := 0
 
@@ -95,6 +111,72 @@ func _ready() -> void:
 	_bags.name = "Bultos"
 	add_child(_bags)
 	_static_count = containers.size()
+
+
+func _process(delta: float) -> void:
+	if not clock_running:
+		return
+	game_minutes += delta * MIN_PER_SEC
+	_apply_daylight()
+	if multiplayer.is_server():
+		_sync_t += delta
+		if _sync_t > 5.0:
+			_sync_t = 0.0
+			_sync_clock.rpc(game_minutes)
+
+
+@rpc("authority", "call_remote", "unreliable")
+func _sync_clock(minutes: float) -> void:
+	game_minutes = minutes
+
+
+func day_number() -> int:
+	return int(game_minutes / 1440.0) + 1
+
+
+func hour() -> float:
+	return fmod(game_minutes / 60.0, 24.0)
+
+
+func clock_text() -> String:
+	var h := hour()
+	var phase := "Noche" if night else ("Mañana" if h < 12 else ("Tarde" if h < 19 else "Anochecer"))
+	return "Día %d · %02d:%02d · %s" % [day_number(), int(h), int(fmod(game_minutes, 60.0)), phase]
+
+
+func set_time(minutes: float) -> void:
+	game_minutes = minutes
+	_apply_daylight()
+
+
+## Luz, cielo, niebla y farolas según la hora. De noche el papel se vuelve tinta.
+func _apply_daylight() -> void:
+	var h := hour()
+	var l := clampf(sin(((h - 5.0) / 16.0) * PI) * 1.5, 0.0, 1.0)
+	daylight = l
+	var was := night
+	night = l < 0.22
+	if night != was:
+		night_changed.emit(night)
+	var dusk := clampf(1.0 - absf(l - 0.35) / 0.25, 0.0, 1.0) * 0.4
+	var paper := NIGHT_PAPER.lerp(PAPER, l).lerp(DUSK, dusk)
+	_env.background_color = paper
+	_env.fog_light_color = paper
+	_env.fog_depth_begin = lerpf(4.0, 18.0, l)
+	_env.fog_depth_end = lerpf(38.0, 85.0, l)
+	_env.ambient_light_color = Color(0.2, 0.24, 0.36).lerp(Color(0.42, 0.46, 0.56), l)
+	_env.ambient_light_energy = lerpf(0.7, 0.9, l)
+	# de día el sol cruza el cielo; de noche una luna fría y quieta
+	var a := ((h - 5.0) / 16.0) * PI
+	if l > 0.05:
+		_sun.rotation = Vector3(-deg_to_rad(12.0 + 50.0 * absf(sin(a))), deg_to_rad(40.0) + a * 0.4, 0.0)
+	else:
+		_sun.rotation = Vector3(-deg_to_rad(55.0), deg_to_rad(-30.0), 0.0)
+	_sun.light_energy = lerpf(0.35, 1.35, l)
+	_sun.light_color = Color(0.55, 0.62, 0.9).lerp(Color(1.0, 0.95, 0.86), smoothstep(0.1, 0.4, l)).lerp(Color(1.0, 0.7, 0.5), dusk)
+	var lamp_energy := clampf((0.35 - l) * 6.0, 0.0, 1.6)
+	for lamp in get_tree().get_nodes_in_group("night_lights"):
+		lamp.light_energy = lamp_energy * (0.85 + 0.15 * sin(game_minutes * 7.0 + lamp.position.x))
 
 
 func _apply_settings() -> void:
@@ -324,11 +406,12 @@ func send_state_to(peer: int) -> void:
 	for i in containers.size():
 		if containers[i].empty:
 			empties.append(i)
-	_sync_state.rpc_id(peer, bags, empties)
+	_sync_state.rpc_id(peer, bags, empties, game_minutes)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _sync_state(bags: Array, empties: PackedInt32Array) -> void:
+func _sync_state(bags: Array, empties: PackedInt32Array, minutes: float) -> void:
+	set_time(minutes)
 	for b in bags:
 		if b[0] == containers.size():
 			_add_bag(b[0], b[1], b[2], b[3])
@@ -348,11 +431,12 @@ func export_state() -> Dictionary:
 		var c: Dictionary = containers[i]
 		if not c.loot.is_empty():
 			bags.append({"pos": c.pos, "name": c.name, "corpse": c.corpse, "loot": c.loot.duplicate()})
-	return {"containers": conts, "bags": bags}
+	return {"containers": conts, "bags": bags, "minutes": game_minutes}
 
 
 func import_state(d: Dictionary) -> void:
 	reset_containers()
+	set_time(d.get("minutes", START_MINUTES))
 	var conts: Dictionary = d.get("containers", {})
 	for i in conts:
 		if i < _static_count:
@@ -369,6 +453,7 @@ func import_state(d: Dictionary) -> void:
 
 
 func reset_containers() -> void:
+	set_time(START_MINUTES)
 	for c in containers.slice(_static_count):
 		c.node.queue_free()
 	containers.resize(_static_count)
@@ -392,6 +477,44 @@ func _register_container(body: Node3D, type: String, color: Color) -> void:
 
 
 # ------------------------------------------------------------------ efectos en tiempo real
+const FONT_WORDS := preload("res://fonts/Bangers-Regular.ttf")
+const WORDS := {
+	"puños": ["¡PAF!", "¡PUM!", "¡ZAS!"],
+	"bate": ["¡CRACK!", "¡PLAF!", "¡TONC!"],
+	"hacha": ["¡CHAC!", "¡CRUNCH!", "¡ZAC!"],
+	"pistola": ["¡BANG!"],
+	"muerte": ["¡CHOF!", "¡PLOF!"],
+	"herido": ["¡AGH!", "¡AY!", "¡ARGH!"],
+}
+
+
+## Onomatopeya de cómic que salta en el mundo y se desvanece.
+func spawn_word(pos: Vector3, kind: String, color := Color(0.98, 0.95, 0.85), size := 1.0) -> void:
+	var options: Array = WORDS.get(kind, [kind])
+	var l := Label3D.new()
+	l.text = options[randi() % options.size()]
+	l.font = FONT_WORDS
+	l.font_size = 110
+	l.outline_size = 26
+	l.modulate = color
+	l.outline_modulate = Color(0.07, 0.065, 0.075)
+	l.pixel_size = 0.005 * size
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = true
+	l.render_priority = 10
+	l.outline_render_priority = 9
+	l.position = pos + Vector3(randf_range(-0.3, 0.3), 1.6 + randf_range(0.0, 0.3), randf_range(-0.3, 0.3))
+	l.scale = Vector3.ONE * 0.3
+	_fx.add_child(l)
+	var tw := l.create_tween()
+	tw.tween_property(l, "scale", Vector3.ONE * 1.15, 0.08)
+	tw.tween_property(l, "scale", Vector3.ONE, 0.06)
+	tw.tween_interval(0.55)
+	tw.set_parallel(true)
+	tw.tween_property(l, "position:y", l.position.y + 0.5, 0.35)
+	tw.tween_property(l, "modulate:a", 0.0, 0.35)
+	tw.tween_property(l, "outline_modulate:a", 0.0, 0.35)
+	tw.chain().tween_callback(l.queue_free)
 ## Mancha de sangre (golpes, heridas). Se borran las más viejas.
 func spawn_blood(pos: Vector3, size: float) -> void:
 	var splat := Node3D.new()
@@ -443,6 +566,7 @@ func _build_environment() -> void:
 	_apply_settings()
 
 	var env := Environment.new()
+	_env = env
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = PAPER
 	# la sombra es el ambiente: azul grisáceo, como tinta aguada
@@ -535,6 +659,19 @@ func _build_house(cx: float, cz: float, w: float, d: float, door_side: String) -
 	_box(Vector3(cx, 0.06, door_z + front * 0.55), Vector3(2.2, 0.12, 0.9), C_WALK, false, house)
 	var door := _box(Vector3(cx + DOOR_W / 2 - 0.05, DOOR_H / 2, door_z + front * (DOOR_W / 2)), Vector3(0.06, DOOR_H - 0.05, DOOR_W - 0.1), C_DARK_WOOD, false, house)
 	door.rotation.y = rng.randf_range(-0.3, 0.2)
+	# luz de porche en algunas casas (solo de noche). Usa su propio azar para
+	# no cambiar el resto del mapa ni las partidas guardadas.
+	if absi(hash(Vector2i(int(cx * 10), int(cz * 10)))) % 2 == 0:
+		var lamp := OmniLight3D.new()
+		lamp.position = Vector3(cx + 1.3, DOOR_H + 0.2, door_z + front * 0.35)
+		lamp.light_color = Color(1.0, 0.8, 0.5)
+		lamp.light_energy = 0.0
+		lamp.omni_range = 7.5
+		lamp.omni_attenuation = 1.4
+		lamp.add_to_group("night_lights")
+		lamp.add_to_group("dynamic")
+		house.add_child(lamp)
+		_box(lamp.position + Vector3(0, 0.12, -front * 0.05), Vector3(0.18, 0.22, 0.12), Color(0.2, 0.2, 0.2), false, house)
 	# sangre en la entrada de algunas casas
 	if rng.randf() < 0.5:
 		_blood(Vector3(cx + rng.randf_range(-1.0, 1.0), 0, door_z + front * rng.randf_range(0.8, 2.5)), 1.0)

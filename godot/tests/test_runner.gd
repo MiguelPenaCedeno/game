@@ -147,6 +147,25 @@ func _test_solo() -> void:
 		z.damage(3.0, Vector3.ZERO)
 	check(z.dead, "el zombi muere a golpes")
 
+	# día y noche
+	w.set_time(23.0 * 60.0)
+	check(w.night, "a las 23:00 es de noche")
+	check(main.zombie_target() > main.ZOMBIE_COUNT, "de noche hay más zombis (%d)" % main.zombie_target())
+	p.flashlight = true
+	check(p._torch.visible, "la linterna se enciende")
+	w.set_time(12.0 * 60.0)
+	check(not w.night, "a mediodía es de día")
+	check(w.clock_text().begins_with("Día 1 · 12:00"), "el reloj marca la hora (%s)" % w.clock_text())
+
+	# sonido y onomatopeyas
+	check(Sfx.streams.size() >= 18 and Sfx.streams.shot is AudioStreamWAV, "los sonidos están generados (%d)" % Sfx.streams.size())
+	var words_before: int = w._fx.get_child_count()
+	w.spawn_word(p.global_position, "bate")
+	check(w._fx.get_child_count() == words_before + 1, "aparece una onomatopeya")
+
+	# en solitario no se cae al suelo: se muere
+	check(not p._teammate_alive(), "jugando solo no hay quien te levante")
+
 	# pausa
 	main._set_paused(true)
 	check(get_tree().paused, "Esc pausa el juego en solitario")
@@ -162,7 +181,20 @@ func _test_host() -> void:
 	main._on_host_pressed()
 	check(await _wait_until(func(): return main.players.get_child_count() >= 2, 20.0), "se une la otra persona")
 	check(await _wait_until(func(): return main.world.containers[0].empty, 15.0), "veo vacío el mueble que vació ella")
-	await _wait(3.0)
+	# ella cae al suelo: voy y la levanto
+	var guest: Node = null
+	for pl in main.players.get_children():
+		if pl.name != "1":
+			guest = pl
+	check(await _wait_until(func(): return guest.downed, 15.0), "veo a mi compañera en el suelo")
+	var me := _me()
+	me.global_position = guest.global_position + Vector3(1.0, 0.2, 0)
+	await _wait(0.3)
+	check(me.revive_target == guest, "puedo levantarla")
+	me._start_search()
+	check(await _wait_until(func(): return not guest.downed, 8.0), "la levanto")
+	check(main.world._fx != null, "el reloj sigue: %s" % main.world.clock_text())
+	await _wait(2.0)
 	SaveGame.delete_world()
 
 
@@ -187,4 +219,11 @@ func _test_client() -> void:
 	await _wait(0.5)
 	check(main.hud.cont_loot.is_empty(), "lo vacío (tenía %s)" % str(loot))
 	main.hud.close_panel()
+	# me tumban: caigo al suelo (no muero) porque el anfitrión sigue en pie
+	for z in main.zombies.get_children():
+		z.set_process(false)
+	p.take_hit(500.0, p.global_position + Vector3(1, 0, 0))
+	check(p.downed and not p.dead, "con 0 de salud caigo al suelo en vez de morir")
+	check(await _wait_until(func(): return not p.downed, 15.0), "mi compañero me levanta")
+	check(p.hp > 0 and not p.dead, "vuelvo con algo de salud (%d)" % p.hp)
 	await _wait(1.0)

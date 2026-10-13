@@ -9,7 +9,8 @@ extends Node3D
 const PLAYER_SCENE := preload("res://scenes/player.tscn")
 const ZOMBIE_SCENE := preload("res://scenes/zombie.tscn")
 const HUD_SCRIPT := preload("res://scripts/hud.gd")
-const ZOMBIE_COUNT := 26
+const ZOMBIE_COUNT := 22
+const ZOMBIE_MAX := 45
 ## los zombis nuevos aparecen al menos así de lejos de cualquier jugador
 const ZOMBIE_SPAWN_MIN_DIST := 30.0
 const INK_SHADER := preload("res://shaders/ink_post.gdshader")
@@ -44,6 +45,7 @@ var _zombie_timer: Timer
 
 
 func _ready() -> void:
+	add_to_group("main")
 	menu_camera.look_at_from_position(Vector3(30, 14, 34), Vector3(4, 0, 6))
 	# el menú y la interfaz siguen vivos en pausa; el mundo no
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -62,6 +64,7 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if in_game:
 		_update_hud()
+	_update_ink_daylight()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -163,6 +166,7 @@ func _add_player(id: int) -> void:
 # ------------------------------------------------------------------ estados
 func _start_game() -> void:
 	in_game = true
+	world.clock_running = true
 	if _autosave == null:
 		_autosave = Timer.new()
 		_autosave.wait_time = 60.0
@@ -177,6 +181,7 @@ func _start_game() -> void:
 
 func _back_to_menu(message: String) -> void:
 	in_game = false
+	world.clock_running = false
 	for p in players.get_children():
 		p.queue_free()
 	for z in zombies.get_children():
@@ -458,7 +463,7 @@ func _start_zombies() -> void:
 		await get_tree().physics_frame
 	if not in_game:
 		return
-	for i in ZOMBIE_COUNT:
+	for i in zombie_target():
 		_spawn_zombie()
 	if _zombie_timer == null:
 		_zombie_timer = Timer.new()
@@ -476,8 +481,16 @@ func _refill_zombies() -> void:
 	for z in zombies.get_children():
 		if not z.dead:
 			alive += 1
-	for i in mini(ZOMBIE_COUNT - alive, 3):
+	for i in mini(zombie_target() - alive, 3):
 		_spawn_zombie()
+
+
+## Cada día hay más zombis, y de noche más todavía.
+func zombie_target() -> int:
+	var n: int = ZOMBIE_COUNT + (world.day_number() - 1) * 4
+	if world.night:
+		n = int(n * 1.4)
+	return mini(n, ZOMBIE_MAX)
 
 
 func _spawn_zombie() -> void:
@@ -558,8 +571,32 @@ func _notification(what: int) -> void:
 # ------------------------------------------------------------------ ajustes
 func _apply_ink_settings() -> void:
 	_ink_mat.set_shader_parameter("line_width", Settings.line_width)
-	_ink_mat.set_shader_parameter("hatch_strength", Settings.hatching)
 	_ink_mat.set_shader_parameter("grain", Settings.grain)
+
+
+const INK_PAPER_DAY := Color(0.95, 0.91, 0.82)
+const INK_PAPER_NIGHT := Color(0.74, 0.8, 0.98)
+const INK_LINE_NIGHT := Color(0.42, 0.47, 0.6)
+
+
+## De noche el cómic pierde el color (salvo el rojo) y la trama se suaviza.
+func _update_ink_daylight() -> void:
+	var l: float = world.daylight
+	_ink_mat.set_shader_parameter("saturation", lerpf(0.05, 0.38, l))
+	_ink_mat.set_shader_parameter("paper", INK_PAPER_NIGHT.lerp(INK_PAPER_DAY, l))
+	_ink_mat.set_shader_parameter("hatch_strength", Settings.hatching * lerpf(0.5, 1.0, l))
+	# de noche las líneas se aclaran (tiza a la luz de la luna) para que se lean sobre lo oscuro
+	_ink_mat.set_shader_parameter("line_color", INK_LINE_NIGHT.lerp(INK, smoothstep(0.1, 0.45, l)))
+	_impact = maxf(0.0, _impact - get_process_delta_time() * 7.0)
+	_ink_mat.set_shader_parameter("impact", _impact)
+
+
+var _impact := 0.0
+
+
+## Viñeta de impacto (golpes fuertes, disparos): un instante en blanco y negro puro.
+func impact(strength: float) -> void:
+	_impact = maxf(_impact, strength)
 
 
 func _open_settings(from: Control) -> void:

@@ -29,9 +29,10 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
 | C | agacharte (sigilo: casi no haces ruido y te ven de más cerca) |
 | Espacio | saltar |
 | Clic izquierdo | golpear o disparar |
-| E | registrar muebles y maleteros |
+| E | registrar muebles y maleteros · mantener junto a un compañero caído para levantarlo |
 | Q | cambiar de arma |
 | 1 · 2 · 3 | comer · beber · vendarte |
+| F | linterna (de noche los zombis te ven de más lejos si la llevas encendida) |
 | Tab | mochila (ver peso y soltar cosas) |
 | E (con un mueble abierto) | cerrar la ventana del mueble |
 | Esc | menú |
@@ -41,6 +42,10 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
 - **Salud, energía, hambre y sed** como en la versión web. Los arañazos te hacen sangrar (véndate) y alguna mordida te infecta.
 - **Peso:** cada objeto pesa (lata 0,4 kg, botella 0,5 kg, hacha 2,2 kg…). Hasta 8 kg vas normal; a partir de ahí cada vez más lento, por encima de 14 kg no puedes correr y con 20 kg ya no cabe nada más: lo que sobra se queda en el mueble. Con Tab puedes soltar cosas (si estás junto a un mueble, se quedan dentro).
 - **Zombis:** los controla el anfitrión. Oyen el ruido que haces (andar, correr, golpear y sobre todo disparar) y ven lo que tienen delante; agachado es más difícil que te vean. Esquivan paredes y entran por las puertas.
+- **Día y noche:** un día dura 6 minutos (1 s = 4 min de juego). De noche todo se vuelve blanco y negro, los zombis van un 30% más rápido, hay más, y solo te ven de cerca… salvo que lleves la linterna encendida. Cada día aparecen más.
+- **Caer y levantar (cooperativo):** a 0 de salud caes al suelo y tienes 40 s para que tu compañero te levante (manteniendo E a tu lado). Si te siguen mordiendo, el tiempo baja más rápido. Jugando solo, a 0 de salud mueres.
+- **Sonido:** generado por el propio juego (golpes, disparos, pasos, gruñidos, viento, grillos de noche, latido con poca salud). Si pones grabaciones reales en `godot/sounds/` con el mismo nombre (`shot.ogg`, `groan0.wav`…), se usan en su lugar.
+- **Cómic:** onomatopeyas al golpear (¡CRACK!, ¡BANG!, ¡CHOF!), temblor de cámara y una viñeta en blanco y negro puro en los golpes fuertes.
 - **Minimapa** arriba a la derecha: gira contigo. Cuadraditos amarillos = muebles sin registrar, puntos rojos = zombis cercanos, flechas de color = tus compañeros.
 
 ## Jugar online
@@ -111,6 +116,7 @@ godot/
   scripts/minimap.gd   minimapa
   scripts/save_game.gd guardado de mundo y personaje
   scripts/settings.gd  ajustes (autoload "Settings")
+  scripts/sfx.gd       sonidos sintetizados (autoload "Sfx")
   scripts/mesh_batcher.gd  fusiona mallas para dibujar menos piezas
   scripts/data/        tipos de datos (ItemData, ContainerData)
   data/items/          un .tres por objeto: nombre, peso, estadísticas de arma…
@@ -134,7 +140,7 @@ mapa **semiprocedural con lugares hechos a mano**, y al morir **la mochila queda
 - [x] **Fase 0 · Cimientos:** geometría fusionada (5× menos llamadas de dibujo), suavizado en red,
   objetos en `.tres`, ventana de registro objeto a objeto, bultos y mochila en el cadáver,
   guardado, ajustes, pausa en solitario, pruebas automáticas y `.exe` automático
-- [ ] **Fase 1 · Ambiente:** día y noche con linterna, sonido, onomatopeyas, sensación de golpe,
+- [x] **Fase 1 · Ambiente:** día y noche con linterna, sonido, onomatopeyas, sensación de golpe,
   caer herido y que tu compañero te levante
 - [ ] **Fase 2 · Fabricación:** desmontar muebles, materiales, banco de trabajo, hoguera, recetas, reparar
 - [ ] **Fase 3 · Refugio:** fortificar casas (barricadas con vida), construcción libre, almacenes,

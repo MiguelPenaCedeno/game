@@ -39,6 +39,13 @@ const HAIRS: Array[Color] = [Color(0.18, 0.12, 0.08), Color(0.08, 0.07, 0.07), C
 @export var net_pos := Vector3.ZERO
 @export var net_yaw := 0.0
 @export var dead := false
+## en cooperativo, a 0 de salud caes al suelo y tu compañero puede levantarte
+@export var downed := false
+@export var flashlight := false:
+	set(value):
+		flashlight = value
+		if is_node_ready():
+			_torch.visible = value
 @export var weapon := "puños":
 	set(value):
 		weapon = value
@@ -51,6 +58,7 @@ const HAIRS: Array[Color] = [Color(0.18, 0.12, 0.08), Color(0.08, 0.07, 0.07), C
 	set(value):
 		if is_node_ready() and value != attack_count and not is_multiplayer_authority():
 			figure.play_attack(Items.WEAPONS[weapon].cd)
+			_attack_fx()
 		attack_count = value
 
 # --- estadísticas (solo en el equipo del dueño)
@@ -65,6 +73,13 @@ var inv := {"comida": 0, "agua": 0, "vendas": 0, "balas": 0}
 ## armas que llevas y sus golpes restantes (-1 = no se gasta)
 var owned := {"puños": -1}
 var kills := 0
+## segundos que aguantas en el suelo antes de morir
+var bleed_out := 0.0
+var _down_cause := ""
+## compañero caído al que puedes levantar (null si ninguno)
+var revive_target: Node3D
+const BLEED_OUT_TIME := 40.0
+const REVIVE_TIME := 3.5
 var searched := 0
 var alive_time := 0.0
 var weight := 0.0
@@ -75,6 +90,8 @@ var interact_idx := -1
 var search := {}
 
 var pitch := -0.25
+var shake := 0.0
+var _shake_t := 0.0
 var _last_pos := Vector3.ZERO
 var _ground_speed := 0.0
 var _attack_cd := 0.0
@@ -88,6 +105,7 @@ var _world: Node
 @onready var pivot: Node3D = $CameraPivot
 @onready var spring_arm: SpringArm3D = $CameraPivot/SpringArm
 @onready var camera: Camera3D = $CameraPivot/SpringArm/Camera
+var _torch: SpotLight3D
 
 
 func _enter_tree() -> void:
@@ -103,6 +121,9 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
+	_build_torch()
+	figure.footstep.connect(func(soft: bool):
+		Sfx.play_at("step_soft" if soft else "step", global_position, -4.0 if soft else 0.0, 1.0, 22.0))
 	name_label.text = display_name
 	_apply_crouch()
 	figure.set_weapon(weapon)
@@ -140,14 +161,24 @@ func _process(delta: float) -> void:
 		figure.rotation.x = lerpf(figure.rotation.x, PI / 2, clampf(delta * 6.0, 0.0, 1.0))
 		figure.position.y = lerpf(figure.position.y, 0.15, clampf(delta * 6.0, 0.0, 1.0))
 		return
-	figure.rotation.x = 0.0
-	figure.position.y = 0.0
+	if downed:
+		# boca abajo, arrastrándose
+		figure.rotation.x = lerpf(figure.rotation.x, -PI / 2 * 0.9, clampf(delta * 6.0, 0.0, 1.0))
+		figure.position.y = lerpf(figure.position.y, 0.25, clampf(delta * 6.0, 0.0, 1.0))
+	else:
+		figure.rotation.x = 0.0
+		figure.position.y = 0.0
 	_ground_speed = lerpf(_ground_speed, minf(moved, 9.0), clampf(delta * 10.0, 0.0, 1.0))
 	var airborne := is_multiplayer_authority() and not is_on_floor() and absf(velocity.y) > 1.0
 	figure.animate(delta, _ground_speed, crouching, airborne)
 	if is_multiplayer_authority():
 		_world.update_roofs(global_position)
 		camera.fov = Settings.fov
+		# temblor de cámara
+		shake = maxf(0.0, shake - delta * 1.8)
+		_shake_t += delta * 40.0
+		camera.h_offset = sin(_shake_t * 1.3) * shake * 0.35
+		camera.v_offset = cos(_shake_t * 1.7) * shake * 0.25
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -158,12 +189,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		rotate_y(-event.relative.x * sens)
 		pitch = clampf(pitch - event.relative.y * sens * (-1.0 if Settings.invert_y else 1.0), PITCH_MIN, PITCH_MAX)
 		pivot.rotation.x = pitch
+	elif downed:
+		return  # en el suelo solo puedes arrastrarte
 	elif event.is_action_pressed("crouch"):
 		crouching = not crouching
 	elif event.is_action_pressed("attack"):
 		_attack()
 	elif event.is_action_pressed("interact"):
 		_start_search()
+	elif event.is_action_pressed("flashlight"):
+		flashlight = not flashlight
+		Sfx.play("click")
 	elif event.is_action_pressed("next_weapon"):
 		_cycle_weapon()
 	elif event.is_action_pressed("eat"):
@@ -183,6 +219,9 @@ func _physics_process(delta: float) -> void:
 		noise = 0.0
 		return
 	alive_time += delta
+	if downed:
+		_physics_downed(delta)
+		return
 	if not is_on_floor():
 		velocity.y -= GRAVITY * delta
 
@@ -240,11 +279,20 @@ func _physics_process(delta: float) -> void:
 
 	# registrar
 	interact_idx = _world.container_index_near(global_position, -global_transform.basis.z)
+	revive_target = _find_downed_teammate()
 	if not search.is_empty():
 		search.t += delta
 		if global_position.distance_to(search.pos) > 0.7:
 			search = {}
 			message.emit("Dejas de registrar.", false)
+		elif search.has("revive"):
+			var mate: Node3D = search.revive
+			if not is_instance_valid(mate) or not mate.downed:
+				search = {}
+			elif search.t >= search.dur:
+				mate.revive.rpc_id(mate.name.to_int(), display_name)
+				Sfx.play("revive")
+				search = {}
 		elif search.t >= search.dur:
 			var c: Dictionary = _world.containers[search.idx]
 			if not c.get("seen", false):
@@ -285,7 +333,7 @@ func _update_stats(delta: float, running: bool) -> void:
 			cause = "Te desangraste sin encontrar vendas."
 		elif hunger <= 0:
 			cause = "El hambre pudo más que los zombis."
-		_die(cause)
+		_zero_hp(cause)
 
 
 # ------------------------------------------------------------------ mochila y peso
@@ -310,6 +358,7 @@ func use_item(k: String) -> void:
 			message.emit("No tienes hambre.", false)
 			return
 		inv.comida -= 1
+		Sfx.play("eat")
 		hunger = minf(100.0, hunger + 38.0)
 		message.emit("Comes una lata fría de alubias.", false)
 	elif k == "agua":
@@ -320,6 +369,7 @@ func use_item(k: String) -> void:
 			message.emit("No tienes sed.", false)
 			return
 		inv.agua -= 1
+		Sfx.play("eat", 0.0, 1.3)
 		thirst = minf(100.0, thirst + 42.0)
 		message.emit("Bebes media botella de un trago.", false)
 	elif k == "vendas":
@@ -327,6 +377,7 @@ func use_item(k: String) -> void:
 			message.emit("No tienes vendas.", true)
 			return
 		inv.vendas -= 1
+		Sfx.play("pick", 0.0, 0.7)
 		var was := bleeding
 		bleeding = false
 		hp = minf(100.0, hp + 18.0)
@@ -383,12 +434,21 @@ func drop_item(k: String) -> void:
 
 
 func _start_search() -> void:
-	if not search.is_empty() or interact_idx < 0:
+	if not search.is_empty():
+		return
+	# levantar a un compañero va antes que registrar
+	if revive_target:
+		search = {"revive": revive_target, "t": 0.0, "dur": REVIVE_TIME, "pos": global_position}
+		message.emit("Levantando a %s… no te muevas." % revive_target.display_name, false)
+		return
+	if interact_idx < 0:
 		return
 	var c: Dictionary = _world.containers[interact_idx]
 	# la primera vez se registra; después se abre al momento
 	var dur: float = 0.25 if c.get("seen", false) else Items.CONTAINERS[c.type].time
 	search = {"idx": interact_idx, "t": 0.0, "dur": dur, "pos": global_position}
+	if dur > 0.5:
+		Sfx.play_at("search", c.pos, -4.0)
 	_noise_spike = 3.0
 
 
@@ -400,6 +460,7 @@ func _on_item_granted(_idx: int, k: String, n: int) -> void:
 			weapon = k
 	else:
 		inv[k] = inv.get(k, 0) + n
+	Sfx.play("pick")
 	_recalc_weight()
 
 
@@ -419,6 +480,7 @@ func _attack() -> void:
 	if w.gun:
 		if inv.balas <= 0:
 			_attack_cd = 0.3
+			Sfx.play("empty")
 			message.emit("No te quedan balas.", true)
 			return
 		inv.balas -= 1
@@ -426,6 +488,9 @@ func _attack() -> void:
 		_attack_cd = w.cd
 		attack_count += 1
 		figure.play_attack(w.cd)
+		_attack_fx()
+		shake = maxf(shake, 0.5)
+		get_tree().call_group("main", "impact", 0.35)
 		_shoot()
 		return
 	if stamina < w.stam * 0.5:
@@ -437,6 +502,7 @@ func _attack() -> void:
 	_pending_hit = 0.17
 	attack_count += 1
 	figure.play_attack(w.cd)
+	_attack_fx()
 
 
 func _resolve_melee() -> void:
@@ -460,9 +526,12 @@ func _resolve_melee() -> void:
 	hits.sort_custom(func(a, b): return a[0] < b[0])
 	var n := mini(hits.size(), w.hits)
 	for i in n:
-		hits[i][1].damage.rpc_id(1, w.dmg * randf_range(0.85, 1.2), hits[i][2])
+		hits[i][1].damage.rpc_id(1, w.dmg * randf_range(0.85, 1.2), hits[i][2], weapon)
 	if n > 0:
 		_noise_spike = w.noise
+		shake = maxf(shake, 0.25 if weapon == "puños" else 0.4)
+		if weapon == "hacha":
+			get_tree().call_group("main", "impact", 0.3)
 		if owned[weapon] > 0:
 			owned[weapon] -= 1
 			if owned[weapon] <= 0:
@@ -485,7 +554,7 @@ func _shoot() -> void:
 		var head: bool = hit.position.y - col.global_position.y > 1.5
 		var dmg: float = Items.WEAPONS["pistola"].dmg * (2.2 if head else 1.0) * randf_range(0.9, 1.1)
 		var dir: Vector3 = (col.global_position - global_position).normalized() * 0.6
-		col.damage.rpc_id(1, dmg, dir)
+		col.damage.rpc_id(1, dmg, dir, "pistola")
 
 
 # ------------------------------------------------------------------ daño y muerte
@@ -494,8 +563,18 @@ func _shoot() -> void:
 func take_hit(dmg: float, from: Vector3) -> void:
 	if dead or multiplayer.get_remote_sender_id() not in [0, 1]:
 		return
+	if downed:
+		# te siguen mordiendo en el suelo: aguantas menos
+		bleed_out -= 8.0
+		Sfx.play("hurt")
+		shake = maxf(shake, 0.5)
+		return
 	hp -= dmg
 	_hurt_flash = 0.35
+	shake = maxf(shake, 0.6)
+	Sfx.play("hurt")
+	_world.spawn_word(global_position, "herido", Color(0.8, 0.1, 0.06), 0.9)
+	get_tree().call_group("main", "impact", 0.25)
 	var away := global_position - from
 	away.y = 0
 	velocity += away.normalized() * 3.0
@@ -508,7 +587,7 @@ func take_hit(dmg: float, from: Vector3) -> void:
 		bleeding = true
 		message.emit("Un arañazo profundo. Estás sangrando: véndate (3).", true)
 	if hp <= 0.0:
-		_die("Te devoraron con la mordida todavía fresca." if infected else "Te rodearon y te arrastraron al suelo.")
+		_zero_hp("Te devoraron con la mordida todavía fresca." if infected else "Te rodearon y te arrastraron al suelo.")
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -516,9 +595,76 @@ func add_kill() -> void:
 	kills += 1
 
 
+## Salud a cero: en cooperativo caes al suelo; jugando solo, mueres.
+func _zero_hp(cause: String) -> void:
+	if downed or dead:
+		return
+	if _teammate_alive():
+		hp = 0.0
+		downed = true
+		bleed_out = BLEED_OUT_TIME
+		_down_cause = cause
+		search = {}
+		crouching = false
+		Sfx.play("hurt", 0.0, 0.7)
+		get_tree().call_group("main", "impact", 0.6)
+		message.emit("¡Has caído! Tu compañero puede levantarte con E. Arrástrate hacia él.", true)
+	else:
+		_die(cause)
+
+
+func _physics_downed(delta: float) -> void:
+	bleed_out -= delta
+	if bleed_out <= 0.0 or not _teammate_alive():
+		downed = false
+		_die(_down_cause if bleed_out > 0.0 else "Te desangraste esperando ayuda.")
+		return
+	if not is_on_floor():
+		velocity.y -= GRAVITY * delta
+	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back") if captured else Vector2.ZERO
+	var dir := (transform.basis * Vector3(input.x, 0, input.y)).normalized()
+	velocity.x = move_toward(velocity.x, dir.x * 0.6, ACCEL * delta)
+	velocity.z = move_toward(velocity.z, dir.z * 0.6, ACCEL * delta)
+	move_and_slide()
+	var new_noise := 1.0 if input.length() > 0.1 else 0.0
+	if new_noise != noise:
+		noise = new_noise
+
+
+## ¿Queda alguien en pie que pueda levantarte?
+func _teammate_alive() -> bool:
+	if not Network.is_online():
+		return false
+	for p in get_tree().get_nodes_in_group("players"):
+		if p != self and not p.dead and not p.downed:
+			return true
+	return false
+
+
+func _find_downed_teammate() -> Node3D:
+	for p in get_tree().get_nodes_in_group("players"):
+		if p != self and p.downed and not p.dead and p.global_position.distance_to(global_position) < 2.2:
+			return p
+	return null
+
+
+## Te levanta un compañero (se ejecuta en tu equipo).
+@rpc("any_peer", "call_local", "reliable")
+func revive(by: String) -> void:
+	if not downed:
+		return
+	downed = false
+	hp = 30.0
+	bleed_out = 0.0
+	Sfx.play("revive")
+	message.emit("¡%s te ha levantado!" % by, false)
+
+
 func _die(cause: String) -> void:
 	if dead:
 		return
+	downed = false
 	hp = 0.0
 	dead = true
 	search = {}
@@ -553,6 +699,7 @@ func respawn() -> void:
 	kills = 0
 	searched = 0
 	alive_time = 0.0
+	downed = false
 	_recalc_weight()
 	position = SPAWN_POINT + Vector3(randf_range(-2, 2), 0.5, 0)
 	velocity = Vector3.ZERO
@@ -602,6 +749,31 @@ func try_load() -> void:
 func save_state() -> void:
 	if is_multiplayer_authority() and _loaded:
 		SaveGame.save_character(Network.world_id, Network.player_name, export_state())
+
+
+## Linterna: cuelga de la cámara para alumbrar donde miras. Solo la tuya
+## proyecta sombras (las de los demás serían caras y casi no se notan).
+func _build_torch() -> void:
+	_torch = SpotLight3D.new()
+	_torch.light_color = Color(1.0, 0.93, 0.8)
+	_torch.light_energy = 4.0
+	_torch.spot_range = 24.0
+	_torch.spot_angle = 26.0
+	_torch.spot_attenuation = 0.7
+	_torch.shadow_enabled = is_multiplayer_authority()
+	_torch.position = Vector3(0.25, -0.1, -0.4)
+	_torch.visible = flashlight
+	pivot.add_child(_torch)
+
+
+## Sonido y onomatopeya de un ataque (propio o de otro jugador).
+func _attack_fx() -> void:
+	var w: ItemData = Items.WEAPONS[weapon]
+	if w.gun:
+		Sfx.play_at("shot", global_position + Vector3.UP * 1.4, 6.0, 1.0, 80.0)
+		_world.spawn_word(global_position + (-global_transform.basis.z * 0.8), "pistola", Color(1.0, 0.85, 0.3), 1.4)
+	else:
+		Sfx.play_at("swing", global_position + Vector3.UP * 1.2, -2.0)
 
 
 func hurt_flash() -> float:

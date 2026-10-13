@@ -10,6 +10,10 @@ uniform sampler2D normal_texture : hint_normal_roughness_texture, filter_nearest
 
 uniform vec4 ink : source_color = vec4(0.07, 0.065, 0.075, 1.0);
 uniform vec4 paper : source_color = vec4(0.95, 0.91, 0.82, 1.0);
+// color de los contornos (de noche se aclara; la trama sigue usando la tinta)
+uniform vec4 line_color : source_color = vec4(0.07, 0.065, 0.075, 1.0);
+// viñeta de impacto: 1 = fotograma en blanco y negro puro
+uniform float impact : hint_range(0.0, 1.0) = 0.0;
 // contornos
 uniform float line_width = 1.3;
 uniform float depth_threshold = 0.9;
@@ -111,6 +115,13 @@ void fragment() {
 	float v = smoothstep(0.35, 0.95, length((uv - 0.5) * vec2(VIEWPORT_SIZE.x / VIEWPORT_SIZE.y, 1.0)) * 1.1);
 	col *= 1.0 - v * vignette;
 
-	col = mix(col, ink.rgb, edge);
+	col = mix(col, line_color.rgb, edge);
+	// golpe fuerte: un fotograma de tinta y papel sin grises, como una viñeta de impacto
+	if (impact > 0.0) {
+		float l2 = dot(col, vec3(0.299, 0.587, 0.114));
+		vec3 stark = mix(ink.rgb, paper.rgb, step(0.12, l2));
+		stark = mix(stark, ink.rgb, edge);
+		col = mix(col, stark, impact);
+	}
 	ALBEDO = col;
 }
