@@ -10,7 +10,7 @@ class Group:
 	var normals := PackedVector3Array()
 	var colors := PackedColorArray()
 	var indices := PackedInt32Array()
-	var material: Material
+	var material: Variant
 	var shadows := GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 
 
@@ -18,7 +18,16 @@ var groups := {}
 
 
 ## Añade una malla con su transformación (en el espacio del nodo donde irá el resultado).
-func add(mesh: Mesh, xform: Transform3D, key: Variant, material: Material, color: Color,
+func add(mesh: Mesh, xform: Transform3D, key: Variant, material: Variant, color: Color,
+		shadows := GeometryInstance3D.SHADOW_CASTING_SETTING_ON) -> void:
+	for s in mesh.get_surface_count():
+		add_arrays(mesh.surface_get_arrays(s), xform, key, material, color, shadows)
+
+
+## Igual, pero con los datos de la malla ya sacados (sirve desde otro hilo).
+## `material` puede ser un Material o cualquier otra cosa (se guarda en la malla
+## como meta "batch_mat" para ponerle el material más tarde, en el hilo principal).
+func add_arrays(arrays: Array, xform: Transform3D, key: Variant, material: Variant, color: Color,
 		shadows := GeometryInstance3D.SHADOW_CASTING_SETTING_ON) -> void:
 	var g: Group = groups.get(key)
 	if g == null:
@@ -26,26 +35,24 @@ func add(mesh: Mesh, xform: Transform3D, key: Variant, material: Material, color
 		g.material = material
 		g.shadows = shadows
 		groups[key] = g
-	for s in mesh.get_surface_count():
-		var arrays := mesh.surface_get_arrays(s)
-		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-		var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
-		var base := g.verts.size()
-		g.verts.append_array(xform * verts)
-		var normal_xform := Transform3D(xform.basis.inverse().transposed(), Vector3.ZERO)
-		g.normals.append_array(normal_xform * normals)
-		var cols := PackedColorArray()
-		cols.resize(verts.size())
-		# el shader trabaja en lineal; los colores del juego están en sRGB
-		cols.fill(color.srgb_to_linear())
-		g.colors.append_array(cols)
-		var idx = arrays[Mesh.ARRAY_INDEX]
-		if idx == null or (idx as PackedInt32Array).is_empty():
-			for i in verts.size():
-				g.indices.append(base + i)
-		else:
-			for i in (idx as PackedInt32Array):
-				g.indices.append(base + i)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	var base := g.verts.size()
+	g.verts.append_array(xform * verts)
+	var normal_xform := Transform3D(xform.basis.inverse().transposed(), Vector3.ZERO)
+	g.normals.append_array(normal_xform * normals)
+	var cols := PackedColorArray()
+	cols.resize(verts.size())
+	# el shader trabaja en lineal; los colores del juego están en sRGB
+	cols.fill(color.srgb_to_linear())
+	g.colors.append_array(cols)
+	var idx = arrays[Mesh.ARRAY_INDEX]
+	if idx == null or (idx as PackedInt32Array).is_empty():
+		for i in verts.size():
+			g.indices.append(base + i)
+	else:
+		for i in (idx as PackedInt32Array):
+			g.indices.append(base + i)
 
 
 ## Crea un MeshInstance3D por grupo dentro de `parent`. Devuelve los creados.
@@ -64,10 +71,13 @@ func build(parent: Node3D, prefix := "Lote") -> Array[MeshInstance3D]:
 		arrays[Mesh.ARRAY_INDEX] = g.indices
 		var mesh := ArrayMesh.new()
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-		mesh.surface_set_material(0, g.material)
+		if g.material is Material:
+			mesh.surface_set_material(0, g.material)
 		var mi := MeshInstance3D.new()
 		mi.name = "%s%d" % [prefix, n]
 		mi.mesh = mesh
+		if not (g.material is Material):
+			mi.set_meta("batch_mat", g.material)
 		mi.cast_shadow = g.shadows
 		parent.add_child(mi)
 		out.append(mi)

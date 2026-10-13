@@ -1,0 +1,230 @@
+[gd_scene load_steps=33 format=3]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_1"]
+albedo_color = Color(0.36, 0.26, 0.18, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_2"]
+size = Vector3(6, 0.1, 5)
+material = SubResource("StandardMaterial3D_1")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_3"]
+albedo_color = Color(0.22, 0.16, 0.12, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_4"]
+size = Vector3(6, 2.4, 0.2)
+material = SubResource("StandardMaterial3D_3")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_5"]
+size = Vector3(6, 2.4, 0.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_6"]
+size = Vector3(0.2, 2.4, 5)
+material = SubResource("StandardMaterial3D_3")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_7"]
+size = Vector3(0.2, 2.4, 5)
+
+[sub_resource type="BoxMesh" id="BoxMesh_8"]
+size = Vector3(0.2, 2.4, 5)
+material = SubResource("StandardMaterial3D_3")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_9"]
+size = Vector3(0.2, 2.4, 5)
+
+[sub_resource type="BoxMesh" id="BoxMesh_10"]
+size = Vector3(2.4, 2.4, 0.2)
+material = SubResource("StandardMaterial3D_3")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_11"]
+size = Vector3(2.4, 2.4, 0.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_12"]
+size = Vector3(2.4, 2.4, 0.2)
+material = SubResource("StandardMaterial3D_3")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_13"]
+size = Vector3(2.4, 2.4, 0.2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_14"]
+size = Vector3(1.2, 0.4, 0.2)
+material = SubResource("StandardMaterial3D_3")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_15"]
+albedo_color = Color(0.16, 0.19, 0.22, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_16"]
+size = Vector3(0.04, 0.8, 1.0)
+material = SubResource("StandardMaterial3D_15")
+
+[sub_resource type="BoxMesh" id="BoxMesh_17"]
+size = Vector3(6.4, 0.15, 1.6)
+material = SubResource("StandardMaterial3D_1")
+
+[sub_resource type="BoxMesh" id="BoxMesh_18"]
+size = Vector3(0.15, 2.4, 0.15)
+material = SubResource("StandardMaterial3D_3")
+
+[sub_resource type="BoxMesh" id="BoxMesh_19"]
+size = Vector3(0.15, 2.4, 0.15)
+material = SubResource("StandardMaterial3D_3")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_20"]
+albedo_color = Color(0.3, 0.28, 0.27, 1)
+
+[sub_resource type="PrismMesh" id="PrismMesh_21"]
+size = Vector3(6.8, 1.6, 6.6)
+material = SubResource("StandardMaterial3D_20")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_22"]
+albedo_color = Color(0.2, 0.19, 0.18, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_23"]
+size = Vector3(6.2, 0.05, 5.2)
+material = SubResource("StandardMaterial3D_22")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_24"]
+albedo_color = Color(0.5, 0.47, 0.42, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_25"]
+size = Vector3(0.9, 0.45, 1.9)
+material = SubResource("StandardMaterial3D_24")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_26"]
+size = Vector3(0.9, 0.45, 1.9)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_27"]
+albedo_color = Color(0.45, 0.33, 0.22, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_28"]
+size = Vector3(1.6, 0.8, 0.6)
+material = SubResource("StandardMaterial3D_27")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_29"]
+size = Vector3(1.6, 0.8, 0.6)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_30"]
+albedo_color = Color(0.4, 0.3, 0.2, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_31"]
+top_radius = 0.35
+bottom_radius = 0.35
+height = 0.5
+radial_segments = 10
+material = SubResource("StandardMaterial3D_30")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_32"]
+size = Vector3(0.7, 0.5, 0.7)
+
+[node name="Cabaña del cazador" type="Node3D"]
+
+[node name="Colision" type="StaticBody3D" parent="."]
+
+[node name="Suelo" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_2")
+position = Vector3(0, 0.05, 0)
+
+[node name="MuroFondo" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_4")
+position = Vector3(0, 1.2, -2.4)
+
+[node name="MuroFondoC" type="CollisionShape3D" parent="Colision"]
+shape = SubResource("BoxShape3D_5")
+position = Vector3(0, 1.2, -2.4)
+
+[node name="MuroIzq" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_6")
+position = Vector3(-2.9, 1.2, 0)
+
+[node name="MuroIzqC" type="CollisionShape3D" parent="Colision"]
+shape = SubResource("BoxShape3D_7")
+position = Vector3(-2.9, 1.2, 0)
+
+[node name="MuroDer" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_8")
+position = Vector3(2.9, 1.2, 0)
+
+[node name="MuroDerC" type="CollisionShape3D" parent="Colision"]
+shape = SubResource("BoxShape3D_9")
+position = Vector3(2.9, 1.2, 0)
+
+[node name="FrenteIzq" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_10")
+position = Vector3(-1.8, 1.2, 2.4)
+
+[node name="FrenteIzqC" type="CollisionShape3D" parent="Colision"]
+shape = SubResource("BoxShape3D_11")
+position = Vector3(-1.8, 1.2, 2.4)
+
+[node name="FrenteDer" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_12")
+position = Vector3(1.8, 1.2, 2.4)
+
+[node name="FrenteDerC" type="CollisionShape3D" parent="Colision"]
+shape = SubResource("BoxShape3D_13")
+position = Vector3(1.8, 1.2, 2.4)
+
+[node name="Dintel" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_14")
+position = Vector3(0, 2.2, 2.4)
+
+[node name="Ventana" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_16")
+position = Vector3(-3.02, 1.5, 0)
+
+[node name="Porche" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_17")
+position = Vector3(0, 0.08, 3.3)
+
+[node name="Poste0" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_18")
+position = Vector3(-3.0, 1.2, 3.95)
+
+[node name="Poste1" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_19")
+position = Vector3(3.0, 1.2, 3.95)
+
+[node name="Tejado" type="Node3D" parent="."]
+
+[node name="Cubierta" type="MeshInstance3D" parent="Tejado"]
+mesh = SubResource("PrismMesh_21")
+position = Vector3(0, 3.2, 0.4)
+
+[node name="Techo" type="MeshInstance3D" parent="Tejado"]
+mesh = SubResource("BoxMesh_23")
+position = Vector3(0, 2.42, 0)
+
+[node name="Cama" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_25")
+position = Vector3(2.2, 0.25, -1.3)
+
+[node name="CamaC" type="CollisionShape3D" parent="Colision"]
+shape = SubResource("BoxShape3D_26")
+position = Vector3(2.2, 0.25, -1.3)
+
+[node name="Lena" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_28")
+position = Vector3(3.9, 0.4, 1.0)
+
+[node name="LenaC" type="CollisionShape3D" parent="Colision"]
+shape = SubResource("BoxShape3D_29")
+position = Vector3(3.9, 0.4, 1.0)
+
+[node name="Tocon" type="MeshInstance3D" parent="."]
+mesh = SubResource("CylinderMesh_31")
+position = Vector3(4.2, 0.25, 2.6)
+
+[node name="ToconC" type="CollisionShape3D" parent="Colision"]
+shape = SubResource("BoxShape3D_32")
+position = Vector3(4.2, 0.25, 2.6)
+
+[node name="Mueble_armero" type="Marker3D" parent="."]
+position = Vector3(-2.2, 0, -2.0)
+rotation = Vector3(0, 0.0, 0)
+
+[node name="Mueble_arcon" type="Marker3D" parent="."]
+position = Vector3(0.6, 0, -1.9)
+rotation = Vector3(0, 0.0, 0)
+
+[node name="Mueble_estanteria" type="Marker3D" parent="."]
+position = Vector3(2.55, 0, 0.8)
+rotation = Vector3(0, -1.5708, 0)

@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="ContainerData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/container_data.gd" id="1_cont"]
+
+[resource]
+script = ExtResource("1_cont")
+id = "botiquin"
+name = "Botiquín"
+time = 1.5
+loot = [["vendas", 0.85, 1, 3], ["antibioticos", 0.45, 1, 1], ["alcohol", 0.5, 1, 1], ["trapos", 0.3, 1, 2]]
+dismantle = [["chatarra", 1.0, 1, 2]]
+dismantle_time = 3.0

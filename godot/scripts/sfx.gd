@@ -108,6 +108,9 @@ func _build_all() -> void:
 		streams["groan%d" % i] = _mix([_groan(_rng.randf_range(62, 105), _rng.randf_range(5, 9))])
 	streams.wind = _loop(_bandnoise(4.0, 80.0, 500.0, 0.6, true))
 	streams.crickets = _loop(_crickets_wave(3.0))
+	streams.engine = _loop(_engine(1.0))
+	streams.crash = _mix([_noise(0.35, 1400.0, 1.0), _tone("sine", 70, 30, 0.3, 0.9), _delay(_bandnoise(0.25, 2500.0, 7000.0, 0.35), 0.03)])
+	streams.door = _mix([_tone("square", 160, 90, 0.06, 0.3), _noise(0.08, 900.0, 0.5)])
 	streams.heartbeat = _loop(_mix([_tone("sine", 60, 45, 0.12, 0.9), _delay(_tone("sine", 55, 40, 0.14, 0.7), 0.28), _silence(0.95)]))
 	# si alguien pone grabaciones reales en res://sounds/, se usan en lugar de las sintetizadas
 	for name in streams.keys():
@@ -193,6 +196,24 @@ func _groan(f: float, vib: float) -> PackedFloat32Array:
 		y2 += k * (y - y2)
 		var env := minf(1.0, t / 0.25) * pow(maxf(0.0, 1.0 - t / dur), 1.2)
 		a[i] = y2 * env * 0.8
+	return a
+
+
+## Motor al ralentí: explosiones de los cilindros sobre un zumbido grave.
+## Frecuencias enteras en 1 s para que el bucle no tenga corte.
+func _engine(dur: float) -> PackedFloat32Array:
+	var n := int(dur * RATE)
+	var a := PackedFloat32Array()
+	a.resize(n)
+	var k := 1.0 - exp(-TAU * 380.0 / RATE)
+	var y := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var saw := fmod(t * 34.0, 1.0) * 2.0 - 1.0
+		var pulse := pow(1.0 - fmod(t * 68.0, 1.0), 4.0)
+		var x := saw * 0.4 + pulse * 0.9 + _rng.randf_range(-0.25, 0.25)
+		y += k * (x - y)
+		a[i] = y * 0.7
 	return a
 
 

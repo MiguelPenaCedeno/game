@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="ContainerData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/container_data.gd" id="1_cont"]
+
+[resource]
+script = ExtResource("1_cont")
+id = "caja_municion"
+name = "Caja de munición"
+time = 1.4
+loot = [["balas", 0.9, 4, 12], ["pistola", 0.12], ["molotov", 0.15, 1, 2], ["vendas", 0.25, 1, 2], ["comida", 0.3, 1, 2]]
+dismantle = [["tablones", 1.0, 1, 2], ["chatarra", 0.5, 1, 1]]
+dismantle_time = 3.0

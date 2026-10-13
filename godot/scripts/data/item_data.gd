@@ -22,6 +22,8 @@ extends Resource
 @export var thirst := 0.0
 @export var heal := 0.0
 @export var stops_bleeding := false
+## cura la infección de una mordida
+@export var cures_infection := false
 ## objeto que queda al usarlo (p. ej. la botella vacía al beber)
 @export var leaves := ""
 

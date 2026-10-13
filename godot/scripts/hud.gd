@@ -207,7 +207,20 @@ func _process(_delta: float) -> void:
 	# aviso de registrar
 	prompt_panel.visible = false
 	progress.visible = not player.search.is_empty()
-	if player.downed:
+	var riding: Node3D = player._vehicle() if player.riding != "" else null
+	if riding:
+		var tank: float = riding.spec().tank
+		if player.seat == 0:
+			prompt.text = "%s · %d km/h · gasolina %.1f/%d l · chapa %d%%   [E] Bajar  [F] Faros  [Espacio] Freno" % [
+				riding.display_name(), roundi(absf(riding.speed) * 3.6), riding.fuel, roundi(tank), roundi(riding.health)]
+			if riding.fuel <= 0.0:
+				prompt.text = "Sin gasolina · echa un bidón con R desde fuera   [E] Bajar"
+			elif riding.is_wrecked():
+				prompt.text = "El motor está destrozado   [E] Bajar"
+		else:
+			prompt.text = "De copiloto · %d km/h   [E] Bajar" % roundi(absf(riding.speed) * 3.6)
+		prompt_panel.visible = true
+	elif player.downed:
 		progress.visible = true
 		progress.value = player.bleed_out / player.BLEED_OUT_TIME * 100.0
 		prompt.text = "EN EL SUELO · %d s · espera a que te levanten" % ceili(player.bleed_out)
@@ -241,6 +254,16 @@ func _process(_delta: float) -> void:
 		prompt_panel.visible = true
 	elif player.revive_target and not player.dead:
 		prompt.text = "[E] Levantar a %s" % player.revive_target.display_name
+		prompt_panel.visible = true
+	elif player.vehicle_target and not player.dead:
+		var v: Node3D = player.vehicle_target
+		var action := "[E] Conducir" if v.driver == 0 else ("[E] Subir de copiloto" if v.passenger == 0 else "Va lleno")
+		if v.is_wrecked():
+			action = "Destrozado · [E] Subir" if v.driver == 0 else action
+		var fuel := "gasolina %.1f l" % v.fuel
+		if int(player.inv.get("gasolina", 0)) > 0:
+			fuel += " · [R] Echar gasolina"
+		prompt.text = "%s · %s · %s" % [v.display_name(), action, fuel]
 		prompt_panel.visible = true
 	elif player.interact_idx >= 0 and not player.dead:
 		var c: Dictionary = world.containers[player.interact_idx]

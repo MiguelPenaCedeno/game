@@ -8,7 +8,8 @@ extends RefCounted
 ## - Cada jugador guarda su PERSONAJE en su propio equipo, ligado a ese
 ##   world_id y a su nombre: así al volver a unirte recuperas tu mochila.
 
-const VERSION := 1
+## 2: mapa grande de la Fase 4 (las partidas de antes no valen)
+const VERSION := 2
 const WORLD_PATH := "user://partida.save"
 
 

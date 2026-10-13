@@ -8,9 +8,13 @@ extends Node3D
 
 const PLAYER_SCENE := preload("res://scenes/player.tscn")
 const ZOMBIE_SCENE := preload("res://scenes/zombie.tscn")
+const VEHICLE_SCENE := preload("res://scenes/vehicle.tscn")
 const HUD_SCRIPT := preload("res://scripts/hud.gd")
+## zombis alrededor de cada jugador (en el pueblo; en el campo hay menos)
 const ZOMBIE_COUNT := 22
 const ZOMBIE_MAX := 45
+## los que se alejan más que esto de todos los jugadores desaparecen
+const ZOMBIE_DESPAWN_DIST := 115.0
 ## cada cuántos días llega una horda (esa noche)
 const HORDE_EVERY := 7
 var _horde_warned_day := 0
@@ -26,6 +30,10 @@ const ACCENT := Color(0.62, 0.06, 0.04)
 @onready var players: Node3D = $Players
 @onready var zombies: Node3D = $Zombies
 @onready var world: Node3D = $World
+@onready var vehicles: Node3D = $Vehicles
+## vehículos del guardado, a la espera de crearse al empezar
+var _saved_vehicles: Array = []
+var _vehicle_counter := 0
 @onready var menu_camera: Camera3D = $MenuCamera
 
 var in_game := false
@@ -101,6 +109,7 @@ func _on_solo_pressed() -> void:
 	_prepare_world()
 	_start_game()
 	_add_player(1)
+	_spawn_vehicles()
 	_start_zombies()
 
 
@@ -113,6 +122,7 @@ func _on_host_pressed() -> void:
 	_prepare_world()
 	_start_game()
 	_add_player(1)
+	_spawn_vehicles()
 	_start_zombies()
 
 
@@ -149,6 +159,8 @@ func _on_peer_disconnected(id: int) -> void:
 		if p:
 			p.queue_free()
 		world.forget_peer(id)
+		for v in vehicles.get_children():
+			v.forget_peer(id)
 
 
 func _on_connected_to_server() -> void:
@@ -195,6 +207,8 @@ func _back_to_menu(message: String) -> void:
 		p.queue_free()
 	for z in zombies.get_children():
 		z.queue_free()
+	for v in vehicles.get_children():
+		v.queue_free()
 	if _zombie_timer:
 		_zombie_timer.stop()
 	if _autosave:
@@ -459,25 +473,30 @@ func _comic_box(bg: Color, border: int, shadow: int) -> StyleBoxFlat:
 
 
 # ------------------------------------------------------------------ zombis (solo anfitrión)
+## Los zombis viven cerca de los jugadores: aparecen a 32-70 m (fuera de la
+## vista) en zonas con navegación y desaparecen cuando todos se alejan.
 func _start_zombies() -> void:
-	world.bake_navigation()
-	var region: NavigationRegion3D = world.get_node("Navegacion")
-	if region.is_baking():
-		await region.bake_finished
-	# espera a que el mapa de navegación incluya la malla nueva
-	var map := get_world_3d().navigation_map
-	for i in 120:
-		if NavigationServer3D.map_get_iteration_id(map) > 0 and NavigationServer3D.map_get_closest_point(map, Vector3(30, 0, 30)) != Vector3.ZERO:
+	world.enable_navigation()
+	# espera a que la zona de salida tenga su malla de navegación
+	for i in 300:
+		var ready := true
+		for p in players.get_children():
+			if not world.nav_ready_at(p.global_position):
+				ready = false
+		if ready and players.get_child_count() > 0:
 			break
+		await get_tree().physics_frame
+	for i in 20:
 		await get_tree().physics_frame
 	if not in_game:
 		return
-	for i in zombie_target():
-		_spawn_zombie()
+	for p in players.get_children():
+		for i in _local_target(p.global_position):
+			_spawn_zombie(p.global_position)
 	if _zombie_timer == null:
 		_zombie_timer = Timer.new()
 		_zombie_timer.process_mode = Node.PROCESS_MODE_PAUSABLE
-		_zombie_timer.wait_time = 15.0
+		_zombie_timer.wait_time = 12.0
 		_zombie_timer.timeout.connect(_refill_zombies)
 		add_child(_zombie_timer)
 	_zombie_timer.start()
@@ -486,12 +505,27 @@ func _start_zombies() -> void:
 func _refill_zombies() -> void:
 	if not in_game or not multiplayer.is_server():
 		return
-	var alive := 0
+	var alive: Array[Node] = []
 	for z in zombies.get_children():
-		if not z.dead:
-			alive += 1
-	for i in mini(zombie_target() - alive, 3):
-		_spawn_zombie()
+		if z.dead:
+			continue
+		# los que se quedaron lejos de todos desaparecen (salvo los que persiguen a alguien)
+		var near := INF
+		for p in players.get_children():
+			near = minf(near, z.global_position.distance_to(p.global_position))
+		if near > ZOMBIE_DESPAWN_DIST and not z.horde:
+			z.queue_free()
+			continue
+		alive.append(z)
+	for p in players.get_children():
+		var around := 0
+		for z in alive:
+			if z.global_position.distance_to(p.global_position) < 75.0:
+				around += 1
+		for i in mini(_local_target(p.global_position) - around, 3):
+			if alive.size() >= ZOMBIE_MAX * maxi(players.get_child_count(), 1):
+				break
+			_spawn_zombie(p.global_position)
 
 
 ## Cada día hay más zombis, y de noche más todavía.
@@ -502,28 +536,71 @@ func zombie_target() -> int:
 	return mini(n, ZOMBIE_MAX)
 
 
-func _spawn_zombie() -> void:
+## Cuántos zombis rondan por aquí (el pueblo está más lleno que el bosque).
+func _local_target(pos: Vector3) -> int:
+	return int(zombie_target() * world.layout.density_at(pos))
+
+
+func _spawn_zombie(near: Vector3) -> Node:
 	var map := get_world_3d().navigation_map
-	for attempt in 20:
-		var p := Vector3(randf_range(-62, 62), 0, randf_range(-62, 62))
+	for attempt in 24:
+		var a := randf() * TAU
+		var p := near + Vector3(cos(a), 0, sin(a)) * randf_range(ZOMBIE_SPAWN_MIN_DIST + 2.0, 70.0)
+		if absf(p.x) > world.HALF - 3.0 or absf(p.z) > world.HALF - 3.0 or not world.nav_ready_at(p):
+			continue
 		var on_nav := NavigationServer3D.map_get_closest_point(map, p)
-		if on_nav != Vector3.ZERO:
-			p = on_nav
-		var too_close := p.distance_to(Vector3.ZERO) < ZOMBIE_SPAWN_MIN_DIST
+		if on_nav == Vector3.ZERO or Vector2(on_nav.x - p.x, on_nav.z - p.z).length() > 6.0:
+			continue
+		p = on_nav
+		var too_close := false
 		for pl in players.get_children():
 			if pl.global_position.distance_to(p) < ZOMBIE_SPAWN_MIN_DIST:
 				too_close = true
 		if too_close:
 			continue
-		var z := ZOMBIE_SCENE.instantiate()
-		_zombie_counter += 1
-		z.name = "Z%d" % _zombie_counter
-		z.position = p + Vector3.UP * 0.1
-		z.rotation.y = randf() * TAU
-		z.net_pos = z.position
-		z.net_yaw = z.rotation.y
-		zombies.add_child(z, true)
-		return
+		return _add_zombie(p, randf() * TAU)
+	return null
+
+
+func _add_zombie(p: Vector3, yaw: float, horde_target := Vector3.INF) -> Node:
+	var z := ZOMBIE_SCENE.instantiate()
+	_zombie_counter += 1
+	z.name = "Z%d" % _zombie_counter
+	z.position = p + Vector3.UP * 0.1
+	z.rotation.y = yaw
+	z.net_pos = z.position
+	z.net_yaw = z.rotation.y
+	if horde_target != Vector3.INF:
+		z.horde = true
+		z.horde_target = horde_target
+	zombies.add_child(z, true)
+	return z
+
+
+# ------------------------------------------------------------------ vehículos (solo anfitrión)
+## Coches y furgonetas que arrancan: los del guardado o, en partida nueva, los del mapa.
+func _spawn_vehicles() -> void:
+	for v in vehicles.get_children():
+		v.queue_free()
+	var list: Array = _saved_vehicles
+	if list.is_empty():
+		for spot in world.layout.vehicles:
+			list.append({"kind": spot.kind, "color": spot.color, "pos": spot.pos, "yaw": spot.yaw,
+				"fuel": snappedf(randf_range(3.0, 14.0), 0.1), "health": 100.0})
+	for d in list:
+		var v := VEHICLE_SCENE.instantiate()
+		_vehicle_counter += 1
+		v.name = "V%d" % _vehicle_counter
+		v.kind = d.kind
+		v.color = d.color
+		v.position = d.pos + Vector3.UP * 0.2
+		v.rotation.y = d.yaw
+		v.net_pos = v.position
+		v.net_yaw = d.yaw
+		v.fuel = d.fuel
+		v.health = d.health
+		vehicles.add_child(v, true)
+	_saved_vehicles = []
 
 
 # ------------------------------------------------------------------ guardado
@@ -532,6 +609,7 @@ func _prepare_world() -> void:
 	var d := {}
 	if not new_game_check.button_pressed:
 		d = SaveGame.load_world()
+	_saved_vehicles = d.get("vehicles", [])
 	if d.is_empty():
 		SaveGame.delete_world()
 		world.reset_containers()
@@ -557,6 +635,10 @@ func save_now() -> void:
 	if multiplayer.is_server() and not Network.world_id.is_empty():
 		var d: Dictionary = world.export_state()
 		d.world_id = Network.world_id
+		d.vehicles = []
+		for v in vehicles.get_children():
+			if not v.is_queued_for_deletion():
+				d.vehicles.append(v.export_state())
 		SaveGame.save_world(d)
 	var me := players.get_node_or_null(str(multiplayer.get_unique_id()))
 	if me:
@@ -714,29 +796,31 @@ func _on_night_changed(is_night: bool) -> void:
 		start_horde()
 
 
-## La horda entra por el borde del mapa y va a por la base (o a por vosotros).
+## La horda sale del bosque y va a por la base (o a por vosotros si estáis lejos de ella).
 func start_horde() -> void:
 	if not multiplayer.is_server():
 		return
 	var base := _base_position()
+	var anchor := base
+	var near_base := false
+	for p in players.get_children():
+		if p.global_position.distance_to(base) < 90.0:
+			near_base = true
+	if not near_base and players.get_child_count() > 0:
+		anchor = players.get_child(randi() % players.get_child_count()).global_position
+		base = anchor
 	var count: int = 14 + world.day_number()
-	var side := randi() % 4
+	var side := randf() * TAU
+	var map := get_world_3d().navigation_map
 	for i in count:
-		var t := randf_range(-50.0, 50.0)
-		var edge := 64.0
-		var p: Vector3 = [Vector3(t, 0, -edge), Vector3(t, 0, edge), Vector3(-edge, 0, t), Vector3(edge, 0, t)][side]
-		var map := get_world_3d().navigation_map
+		var a := side + randf_range(-0.5, 0.5)
+		var p := anchor + Vector3(cos(a), 0, sin(a)) * randf_range(50.0, 62.0)
+		p.x = clampf(p.x, -world.HALF + 4.0, world.HALF - 4.0)
+		p.z = clampf(p.z, -world.HALF + 4.0, world.HALF - 4.0)
 		var on_nav := NavigationServer3D.map_get_closest_point(map, p)
-		if on_nav != Vector3.ZERO:
+		if on_nav != Vector3.ZERO and Vector2(on_nav.x - p.x, on_nav.z - p.z).length() < 10.0:
 			p = on_nav
-		var z := ZOMBIE_SCENE.instantiate()
-		_zombie_counter += 1
-		z.name = "Z%d" % _zombie_counter
-		z.position = p + Vector3.UP * 0.1
-		z.net_pos = z.position
-		z.horde = true
-		z.horde_target = base + Vector3(randf_range(-3, 3), 0, randf_range(-3, 3))
-		zombies.add_child(z, true)
+		_add_zombie(p, 0.0, base + Vector3(randf_range(-3, 3), 0, randf_range(-3, 3)))
 	_horde_announce.rpc()
 
 

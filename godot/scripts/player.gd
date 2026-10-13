@@ -61,6 +61,14 @@ const HAIRS: Array[Color] = [Color(0.18, 0.12, 0.08), Color(0.08, 0.07, 0.07), C
 			_attack_fx()
 		attack_count = value
 
+## vehículo en el que vas (nombre del nodo en Main/Vehicles; "" = a pie) y asiento (0 = volante)
+@export var riding := "":
+	set(value):
+		riding = value
+		if is_node_ready():
+			_apply_riding()
+@export var seat := 0
+
 # --- estadísticas (solo en el equipo del dueño)
 var hp := 100.0
 var stamina := 100.0
@@ -87,6 +95,11 @@ const REVIVE_TIME := 3.5
 var searched := 0
 var alive_time := 0.0
 var weight := 0.0
+
+## vehículo al que te puedes subir (null si ninguno)
+var vehicle_target: Node3D
+var _look_yaw := 0.0
+var _look_idle := 0.0
 
 ## mueble más cercano al que miras (-1 si ninguno)
 var interact_idx := -1
@@ -130,6 +143,7 @@ func _ready() -> void:
 		Sfx.play_at("step_soft" if soft else "step", global_position, -4.0 if soft else 0.0, 1.0, 22.0))
 	name_label.text = display_name
 	_apply_crouch()
+	_apply_riding()
 	figure.set_weapon(weapon)
 	_world = get_tree().get_first_node_in_group("world")
 
@@ -171,9 +185,11 @@ func _process(delta: float) -> void:
 		figure.position.y = lerpf(figure.position.y, 0.25, clampf(delta * 6.0, 0.0, 1.0))
 	else:
 		figure.rotation.x = 0.0
-		figure.position.y = 0.0
+		figure.position.y = -0.55 if riding != "" else 0.0
+	if riding != "":
+		moved = 0.0  # sentado no se anda
 	_ground_speed = lerpf(_ground_speed, minf(moved, 9.0), clampf(delta * 10.0, 0.0, 1.0))
-	var airborne := is_multiplayer_authority() and not is_on_floor() and absf(velocity.y) > 1.0
+	var airborne := is_multiplayer_authority() and riding == "" and not is_on_floor() and absf(velocity.y) > 1.0
 	figure.animate(delta, _ground_speed, crouching, airborne)
 	if is_multiplayer_authority():
 		_world.update_roofs(global_position)
@@ -196,6 +212,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.is_action_pressed("rotate"):
 			placing.rot += _world.structures.TYPES[placing.type].get("rot_step", PI / 4)
 		return
+	if riding != "":
+		_riding_input(event)
+		return
 	if event is InputEventMouseMotion:
 		var sens: float = Settings.mouse_sensitivity
 		rotate_y(-event.relative.x * sens)
@@ -209,6 +228,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_attack()
 	elif event.is_action_pressed("interact"):
 		_start_search()
+	elif event.is_action_pressed("rotate") and vehicle_target and interact_idx < 0 and search.is_empty():
+		refuel(vehicle_target)
 	elif event.is_action_pressed("rotate") and struct_target >= 0 and search.is_empty():
 		var st: Dictionary = _world.structures.by_id[struct_target]
 		search = {"remove": struct_target, "t": 0.0, "dur": 2.0, "pos": global_position}
@@ -229,6 +250,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if riding != "":
+		if dead or downed:
+			leave_vehicle()
+		else:
+			_physics_riding(delta)
+			return
 	if dead:
 		velocity.x = 0
 		velocity.z = 0
@@ -298,6 +325,7 @@ func _physics_process(delta: float) -> void:
 	# registrar
 	interact_idx = _world.container_index_near(global_position, -global_transform.basis.z)
 	revive_target = _find_downed_teammate()
+	vehicle_target = _find_vehicle() if interact_idx < 0 else null
 	struct_target = _world.structures.index_near(global_position, -global_transform.basis.z) if interact_idx < 0 else -1
 	if not search.is_empty():
 		search.t += delta
@@ -400,6 +428,9 @@ func use_item(slot: String) -> void:
 	if dead or downed:
 		return
 	var options: Array = {"comida": ["guiso", "comida"], "agua": ["agua"], "vendas": ["vendas"]}.get(slot, [slot])
+	# con la mordida infectada, la tecla 3 tira primero de antibióticos
+	if slot == "vendas" and infected and not bleeding:
+		options = ["antibioticos", "vendas"]
 	for k in options:
 		if inv.get(k, 0) > 0:
 			consume(k)
@@ -423,6 +454,9 @@ func consume(k: String) -> void:
 	var was := bleeding
 	if it.stops_bleeding:
 		bleeding = false
+	var was_infected := infected
+	if it.cures_infection:
+		infected = false
 	if it.leaves != "":
 		inv[it.leaves] = inv.get(it.leaves, 0) + 1
 	match k:
@@ -430,6 +464,7 @@ func consume(k: String) -> void:
 		"guiso": message.emit("Comes un guiso caliente. Sienta de maravilla.", false)
 		"agua": message.emit("Bebes media botella de un trago.", false)
 		"vendas": message.emit("Te vendas la herida. Deja de sangrar." if was else "Te cambias las vendas.", false)
+		"antibioticos": message.emit("Te tomas los antibióticos. La fiebre empieza a bajar." if was_infected else "Te tomas un antibiótico, por si acaso.", false)
 		_: message.emit("Usas %s." % it.name.to_lower(), false)
 	if it.category == "medicina":
 		Sfx.play("pick", 0.0, 0.7)
@@ -495,7 +530,9 @@ func _start_search() -> void:
 		message.emit("Levantando a %s… no te muevas." % revive_target.display_name, false)
 		return
 	if interact_idx < 0:
-		if struct_target >= 0:
+		if vehicle_target:
+			enter_vehicle(vehicle_target)
+		elif struct_target >= 0:
 			_use_structure(struct_target)
 		return
 	var c: Dictionary = _world.containers[interact_idx]
@@ -618,6 +655,12 @@ func _shoot() -> void:
 func take_hit(dmg: float, from: Vector3) -> void:
 	if dead or multiplayer.get_remote_sender_id() not in [0, 1]:
 		return
+	if riding != "":
+		# dentro del coche cuesta más que te muerdan; en marcha, no pueden
+		var veh := _vehicle()
+		if veh and absf(veh.speed) > 2.0:
+			return
+		dmg *= 0.5
 	if downed:
 		# te siguen mordiendo en el suelo: aguantas menos
 		bleed_out -= 8.0
@@ -719,6 +762,8 @@ func revive(by: String) -> void:
 func _die(cause: String) -> void:
 	if dead:
 		return
+	if riding != "":
+		leave_vehicle()
 	downed = false
 	_cancel_placing()
 	hp = 0.0
@@ -1089,3 +1134,136 @@ func _net_smooth(delta: float) -> void:
 	else:
 		position = position.lerp(net_pos, 1.0 - exp(-14.0 * delta))
 	rotation.y = lerp_angle(rotation.y, net_yaw, 1.0 - exp(-14.0 * delta))
+
+
+# ------------------------------------------------------------------ vehículos
+func _vehicles_node() -> Node:
+	var main := get_tree().get_first_node_in_group("main")
+	return main.vehicles if main else null
+
+
+func _vehicle() -> Node3D:
+	var vs := _vehicles_node()
+	return vs.get_node_or_null(riding) if vs and riding != "" else null
+
+
+## El vehículo más cercano al que miras, a menos de un par de metros de su chapa.
+func _find_vehicle() -> Node3D:
+	var vs := _vehicles_node()
+	if vs == null:
+		return null
+	var best: Node3D = null
+	var best_d := INF
+	for v in vs.get_children():
+		var local: Vector3 = v.global_transform.affine_inverse() * global_position
+		var s: Dictionary = v.spec()
+		var dx := maxf(absf(local.x) - s.width / 2, 0.0)
+		var dz := maxf(absf(local.z) - s.len / 2, 0.0)
+		var d := Vector2(dx, dz).length()
+		if d < 1.6 and absf(local.y) < 2.0 and d < best_d:
+			best = v
+			best_d = d
+	return best
+
+
+func enter_vehicle(v: Node3D) -> void:
+	if v.is_wrecked() and v.driver == 0:
+		message.emit("%s está destrozado: no arranca." % v.display_name(), true)
+	v.request_enter.rpc_id(1, 0)
+
+
+## El anfitrión te dio asiento (lo llama el vehículo).
+func sit_in(v: Node3D, s: int) -> void:
+	seat = s
+	riding = v.name
+	_look_yaw = 0.0
+	search = {}
+	_cancel_placing()
+	crouching = false
+	spring_arm.add_excluded_object(v.get_rid())
+	if s == 0:
+		message.emit("Al volante. W/S acelerar y frenar · A/D girar · Espacio freno de mano · F faros · E bajar.", false)
+		if v.fuel <= 0.0:
+			message.emit("No queda gasolina. Echa un bidón con R desde fuera.", true)
+	else:
+		message.emit("Vas de copiloto. E para bajar.", false)
+
+
+func leave_vehicle() -> void:
+	var v := _vehicle()
+	riding = ""
+	if v == null:
+		return
+	v.request_exit.rpc_id(1)
+	spring_arm.remove_excluded_object(v.get_rid())
+	var side := -1.0 if seat == 0 else 1.0
+	var out: Vector3 = v.global_transform * Vector3(side * (v.spec().width / 2 + 0.7), 0.3, v.seat_offset(seat).z)
+	global_position = out
+	velocity = Vector3.ZERO
+	rotation.y = v.rotation.y
+	Sfx.play_at("door", global_position, -2.0)
+
+
+## Echar un bidón de gasolina al depósito.
+func refuel(v: Node3D) -> void:
+	if inv.get("gasolina", 0) <= 0:
+		message.emit("Necesitas un bidón de gasolina.", true)
+		return
+	if v.fuel >= v.spec().tank - 0.5:
+		message.emit("El depósito está lleno.", false)
+		return
+	inv.gasolina -= 1
+	_recalc_weight()
+	v.add_fuel.rpc_id(v.get_multiplayer_authority(), v.CAN_LITERS)
+	message.emit("Echas %d litros de gasolina." % int(v.CAN_LITERS), false)
+	Sfx.play_at("search", global_position, -4.0, 1.4)
+
+
+func _riding_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		var sens: float = Settings.mouse_sensitivity
+		_look_yaw -= event.relative.x * sens
+		_look_idle = 0.0
+		pitch = clampf(pitch - event.relative.y * sens * (-1.0 if Settings.invert_y else 1.0), PITCH_MIN, PITCH_MAX)
+		pivot.rotation.x = pitch
+	elif event.is_action_pressed("interact"):
+		var v := _vehicle()
+		if v and absf(v.speed) > 4.0:
+			message.emit("Frena antes de bajarte.", true)
+		else:
+			leave_vehicle()
+	elif event.is_action_pressed("flashlight"):
+		var v := _vehicle()
+		if v and seat == 0:
+			v.lights = not v.lights
+			Sfx.play("click")
+
+
+## Sentado: vas donde va el vehículo y miras hacia donde mira (más lo que gires la cabeza).
+func _physics_riding(delta: float) -> void:
+	var v := _vehicle()
+	var me := multiplayer.get_unique_id()
+	if v == null or (seat == 0 and v.driver != me) or (seat == 1 and v.passenger != me):
+		riding = ""
+		return
+	global_position = v.global_transform * v.seat_offset(seat)
+	velocity = Vector3.ZERO
+	_look_idle += delta
+	if absf(v.speed) > 4.0 and _look_idle > 1.2:
+		_look_yaw = lerp_angle(_look_yaw, 0.0, 1.0 - exp(-1.8 * delta))
+	rotation.y = v.rotation.y + _look_yaw
+	alive_time += delta
+	_update_stats(delta, false)
+	var engine := 0.0
+	if seat == 0 and v.fuel > 0.0 and not v.is_wrecked():
+		engine = 18.0 + absf(v.speed) * 1.4
+	var new_noise := snappedf(engine, 0.5)
+	if new_noise != noise:
+		noise = new_noise
+
+
+## En todos los equipos: dentro de un vehículo no chocas y vas sentado.
+func _apply_riding() -> void:
+	($Collision as CollisionShape3D).disabled = riding != ""
+	if is_multiplayer_authority():
+		spring_arm.spring_length = 5.2 if riding != "" else 2.7

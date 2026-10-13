@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "antibioticos"
+name = "Antibióticos"
+short = "Antibióticos"
+kg = 0.1
+category = "medicina"
+description = "Curan la infección de una mordida. Se usan con 3 si estás infectado."
+heal = 5.0
+cures_infection = true

@@ -58,7 +58,9 @@ func _me() -> Node:
 
 func _goto_container(p: Node, idx: int) -> void:
 	var c: Dictionary = main.world.containers[idx]
-	p.global_position = c.pos + Vector3(0, 0.2, 1.3)
+	var front: Vector3 = Basis(Vector3.UP, main.world.layout.containers[idx].rot) * Vector3(0, 0, 1) if idx < main.world._static_count else Vector3(0, 0, 1)
+	p.global_position = Vector3(c.pos.x, float(c.get("floor_y", 0.0)) + 0.05, c.pos.z) + front * 1.3
+	p.velocity = Vector3.ZERO
 	p.look_at(Vector3(c.pos.x, p.global_position.y, c.pos.z), Vector3.UP)
 
 
@@ -67,9 +69,15 @@ func _open(p: Node, idx: int) -> bool:
 	_goto_container(p, idx)
 	await _wait(0.3)
 	if p.interact_idx != idx:
+		var c: Dictionary = main.world.containers[idx]
+		print("    (mueble %d: nodo %s, en %s; yo en %s, miro el %d)" % [idx, c.node, c.pos, p.global_position, p.interact_idx])
 		return false
+	var at: Vector3 = p.global_position
 	p._start_search()
-	return await _wait_until(func(): return main.hud.is_container_open(), 5.0)
+	var ok: bool = await _wait_until(func(): return main.hud.is_container_open(), 5.0)
+	if not ok:
+		print("    (no se abrió: búsqueda %s, me moví %.2f m, vivo %s, hp %d)" % [p.search, p.global_position.distance_to(at), not p.dead, p.hp])
+	return ok
 
 
 # ------------------------------------------------------------------ solo
@@ -83,7 +91,10 @@ func _test_solo() -> void:
 	var p := _me()
 	var w: Node = main.world
 	check(w.containers.size() > 10, "hay muebles registrables (%d)" % w.containers.size())
-	check(w.get_node("Geometria").get_child_count() < 400, "el mapa está fusionado (%d mallas)" % w.get_node("Geometria").get_child_count())
+	var meshes := 0
+	for t in w.tiles:
+		meshes += w.tiles[t].root.get_node("Geometria").get_child_count()
+	check(w.tiles.size() >= 4 and meshes < 120 * w.tiles.size(), "el mapa está fusionado (%d zonas, %d mallas)" % [w.tiles.size(), meshes])
 
 	# registrar y coger
 	var idx := -1
@@ -168,6 +179,8 @@ func _test_solo() -> void:
 
 	await _test_crafting(p, w)
 	await _test_building(p, w)
+	await _test_big_map(p, w)
+	await _test_vehicles(p, w)
 
 	# pausa
 	main._set_paused(true)
@@ -199,18 +212,31 @@ func _test_host() -> void:
 			if c.type == "caja":
 				return true
 		return false, 10.0), "veo la caja que construyó ella")
+	var driven: Array = [null]
+	check(await _wait_until(func():
+		for v in main.vehicles.get_children():
+			if v.driver > 1:
+				driven[0] = v
+				return true
+		return false, 20.0), "veo que ella se sube a un coche")
+	if driven[0]:
+		var dv: Node3D = driven[0]
+		var p0: Vector3 = dv.global_position
+		check(await _wait_until(func(): return dv.global_position.distance_to(p0) > 2.0, 10.0), "y lo veo moverse (%.1f m)" % dv.global_position.distance_to(p0))
+		check(await _wait_until(func(): return dv.driver == 0, 15.0), "y bajarse")
 	# ella cae al suelo: voy y la levanto
 	var guest: Node = null
 	for pl in main.players.get_children():
 		if pl.name != "1":
 			guest = pl
-	check(await _wait_until(func(): return guest.downed, 15.0), "veo a mi compañera en el suelo")
+	check(await _wait_until(func(): return guest != null and guest.downed, 15.0), "veo a mi compañera en el suelo")
 	var me := _me()
-	me.global_position = guest.global_position + Vector3(1.0, 0.2, 0)
-	await _wait(0.3)
+	me.global_position = guest.global_position + Vector3(0, 0.2, 1.0)
+	await _wait(0.5)
 	check(me.revive_target == guest, "puedo levantarla")
+	var start: Vector3 = me.global_position
 	me._start_search()
-	check(await _wait_until(func(): return not guest.downed, 8.0), "la levanto")
+	check(await _wait_until(func(): return not guest.downed, 8.0), "la levanto (me moví %.2f m)" % me.global_position.distance_to(start))
 	check(main.world._fx != null, "el reloj sigue: %s" % main.world.clock_text())
 	await _wait(2.0)
 	SaveGame.delete_world()
@@ -250,6 +276,27 @@ func _test_client() -> void:
 	await _wait(0.5)
 	check(main.hud.cont_loot.is_empty(), "lo vacío (tenía %s)" % str(loot))
 	main.hud.close_panel()
+	# conducir un coche del anfitrión
+	check(await _wait_until(func(): return main.vehicles.get_child_count() > 0, 10.0), "veo los coches")
+	var v := _nearest_vehicle(p.global_position)
+	main.world.ensure_loaded([v.global_position])
+	p.global_position = v.global_transform * Vector3(-2.0, 0.2, 0.0)
+	p.look_at(v.global_position + Vector3.UP * 0.2, Vector3.UP)
+	await _wait(0.4)
+	check(p.vehicle_target == v, "me acerco a un coche")
+	p._start_search()
+	check(await _wait_until(func(): return p.riding == String(v.name), 4.0), "me subo al volante")
+	check(v.is_multiplayer_authority(), "y el coche me hace caso a mí")
+	v.fuel = maxf(v.fuel, 5.0)
+	var start: Vector3 = v.global_position
+	await _drive(2.0)
+	check(v.global_position.distance_to(start) > 4.0, "conduzco (%.1f m)" % v.global_position.distance_to(start))
+	Input.action_press("jump")
+	await _wait_until(func(): return absf(v.speed) < 1.0, 4.0)
+	Input.action_release("jump")
+	await _wait(1.0)
+	p.leave_vehicle()
+	check(await _wait_until(func(): return v.driver == 0 and not v.is_multiplayer_authority(), 4.0), "me bajo y el coche vuelve al anfitrión")
 	# me tumban: caigo al suelo (no muero) porque el anfitrión sigue en pie
 	for z in main.zombies.get_children():
 		z.set_process(false)
@@ -389,6 +436,162 @@ func _test_crafting(p: Node, w: Node) -> void:
 	z.global_position = land
 	w.request_fire(p.global_position, land, 0.1)
 	check(await _wait_until(func(): return z.dead, 8.0), "el fuego mata al zombi")
+
+
+# ------------------------------------------------------------------ mapa grande (Fase 4)
+func _test_big_map(p: Node, w: Node) -> void:
+	print("-- mapa grande --")
+	var lay: WorldLayout = w.layout
+	check(lay.places.size() >= 12, "hay lugares con nombre (%d)" % lay.places.size())
+	var gone := -1
+	for i in w._static_count:
+		if w.containers[i].get("gone", false):
+			gone = i
+	# irse lejos: se construye lo de allí (en otro hilo) y se quita lo del centro
+	var far := Vector3(200, 0.3, -12)
+	var ft := WorldLayout.tile_of(far.x, far.z)
+	for z in main.zombies.get_children():
+		z.queue_free()
+	p.global_position = far
+	check(await _wait_until(func(): return w.tiles.has(ft), 15.0), "al llegar a la gasolinera se construye su zona")
+	check(not w.tiles.has(Vector2i(3, 3)) and w.containers[0].node == null, "y se quita la del centro del pueblo")
+	var bidon := -1
+	for i in w._static_count:
+		if w.containers[i].type == "bidon" and w.containers[i].pos.distance_to(far) < 30.0:
+			bidon = i
+	check(bidon >= 0 and w.containers[bidon].node != null, "hay bidones de gasolina en la gasolinera")
+	check(await _wait_until(func(): return w.nav_ready_at(far), 10.0), "la zona nueva tiene navegación para los zombis")
+	var spawned: Node = main._spawn_zombie(far)
+	check(spawned != null, "aparecen zombis alrededor (%s)" % (str(spawned.global_position) if spawned else "-"))
+	# volver: lo desmontado sigue desmontado
+	p.global_position = Vector3(0, 0.2, 4)
+	check(await _wait_until(func(): return w.containers[0].node != null, 15.0), "al volver, el centro se construye otra vez")
+	if gone >= 0:
+		await _wait_until(func(): return w.containers[gone].node != null, 10.0)
+		var gn: StaticBody3D = w.containers[gone].node
+		check(gn != null and not gn.visible and gn.collision_layer == 0, "y lo desmontado sigue sin estar")
+	# tiempos de construcción
+	var worst := 0.0
+	for t in [Vector2i(3, 3), Vector2i(6, 4), Vector2i(1, 1)]:
+		var t0 := Time.get_ticks_usec()
+		var n: Node3D = w.helper.build(t)
+		worst = maxf(worst, (Time.get_ticks_usec() - t0) / 1000.0)
+		n.free()
+	print("    (la zona más cara tarda %.0f ms en construirse)" % worst)
+
+	# casa de dos plantas
+	var house: Dictionary = {}
+	for h in lay.houses:
+		if h.floors == 2:
+			house = h
+			break
+	check(not house.is_empty(), "hay casas de dos plantas")
+	var hc := Vector3(house.center.x, 0.2, house.center.y)
+	w.ensure_loaded([hc])
+	var xf := Transform3D(Basis(Vector3.UP, house.yaw), Vector3(house.center.x, 0, house.center.y))
+	var z_mid: float = house.d / 2 - 1.0 + TileBuilder.STAIR_RUN / TileBuilder.STAIR_STEPS - TileBuilder.STAIR_RUN / 2
+	var mid: Vector3 = xf * Vector3(house.stairs_x, 0, z_mid)
+	await get_tree().physics_frame
+	var hit: Dictionary = w.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(mid + Vector3.UP * 2.5, mid + Vector3.DOWN, 1))
+	check(not hit.is_empty() and hit.position.y > 0.8 and hit.position.y < 2.2, "la escalera tiene rampa (%.2f m)" % (hit.position.y if hit else -1.0))
+	var up := -1
+	for i in w._static_count:
+		var c: Dictionary = w.containers[i]
+		if c.floor_y > 0.0 and (house.rect as Rect2).has_point(Vector2(c.pos.x, c.pos.z)):
+			up = i
+	check(up >= 0, "hay muebles en el piso de arriba")
+	if up >= 0:
+		var c: Dictionary = w.containers[up]
+		var front: Vector3 = Basis(Vector3.UP, lay.containers[up].rot) * Vector3(0, 0, 1)
+		var stand: Vector3 = c.pos + front * 1.2
+		stand.y = WorldLayout.WALL_H + 0.05
+		check(w.container_index_near(stand, -front) == up, "arriba se puede registrar")
+		stand.y = 0.05
+		check(w.container_index_near(stand, -front) != up, "desde abajo no")
+	w.update_roofs(hc)
+	check(w._roof_state.get("upper") != null, "al entrar abajo se oculta el piso de arriba")
+	w.update_roofs(hc + Vector3.UP * WorldLayout.WALL_H)
+	check(w._roof_state.get("upper") == null and w._roof_state.get("roof") != null, "y arriba solo el tejado")
+
+	# antibióticos
+	p.infected = true
+	p.inv["antibioticos"] = 1
+	p.use_item("vendas")
+	check(not p.infected and p.inv.antibioticos == 0, "los antibióticos curan la infección")
+	p.global_position = Vector3(0, 0.2, 4)
+
+
+# ------------------------------------------------------------------ vehículos (Fase 4)
+func _nearest_vehicle(pos: Vector3) -> Node3D:
+	var best: Node3D = null
+	for v in main.vehicles.get_children():
+		if best == null or v.global_position.distance_to(pos) < best.global_position.distance_to(pos):
+			best = v
+	return best
+
+
+func _drive(seconds: float, action := "move_forward") -> void:
+	Input.action_press(action)
+	await _wait(seconds)
+	Input.action_release(action)
+
+
+func _test_vehicles(p: Node, w: Node) -> void:
+	print("-- vehículos --")
+	check(main.vehicles.get_child_count() == w.layout.vehicles.size(), "hay vehículos que arrancan (%d)" % main.vehicles.get_child_count())
+	var v := _nearest_vehicle(Vector3(0, 0, 20))
+	w.ensure_loaded([v.global_position])
+	p.global_position = v.global_transform * Vector3(-2.0, 0.2, 0.0)
+	p.look_at(v.global_position + Vector3.UP * 0.2, Vector3.UP)
+	await _wait(0.3)
+	check(p.vehicle_target == v, "me acerco a un %s" % v.display_name().to_lower())
+	v.fuel = 10.0
+	p._start_search()
+	check(await _wait_until(func(): return p.riding == String(v.name), 3.0), "me subo al volante")
+	check(v.driver == 1 and v.is_multiplayer_authority(), "conduzco yo")
+	var start: Vector3 = v.global_position
+	await _drive(2.0)
+	var moved: float = v.global_position.distance_to(start)
+	check(moved > 5.0, "acelero y avanzo (%.1f m, %d km/h)" % [moved, roundi(absf(v.speed) * 3.6)])
+	check(v.fuel < 10.0, "gasta gasolina (%.2f l)" % v.fuel)
+	check(p.global_position.distance_to(v.global_position) < 2.0, "voy dentro")
+	check(p.noise > 15.0, "el motor hace ruido (%.0f m)" % p.noise)
+	# atropellar
+	var z: Node = null
+	for zz in main.zombies.get_children():
+		if not zz.dead:
+			z = zz
+	if z == null:
+		z = main._add_zombie(v.global_position + Vector3(30, 0, 0), 0.0)
+		await _wait(0.1)
+	z.set_physics_process(false)
+	var fwd: Vector3 = -v.global_transform.basis.z
+	z.global_position = v.global_position + fwd * 7.0
+	var hp_before: float = z.hp
+	await _drive(1.2)
+	check(z.dead or z.hp < hp_before, "atropello a un zombi")
+	# frenar y bajar
+	Input.action_press("jump")
+	await _wait_until(func(): return absf(v.speed) < 1.0, 4.0)
+	Input.action_release("jump")
+	p.leave_vehicle()
+	await _wait(0.3)
+	check(p.riding == "" and v.driver == 0, "me bajo")
+	check(not p.get_node("Collision").disabled, "y vuelvo a chocar con las cosas")
+	# gasolina
+	p.inv["gasolina"] = 1
+	var before: float = v.fuel
+	p.refuel(v)
+	await _wait(0.1)
+	check(is_equal_approx(v.fuel, before + v.CAN_LITERS) and p.inv.gasolina == 0, "echo un bidón de gasolina (%.1f -> %.1f l)" % [before, v.fuel])
+	# guardado
+	main.save_now()
+	var saved := SaveGame.load_world()
+	var found := false
+	for d in saved.get("vehicles", []):
+		if (d.pos as Vector3).distance_to(v.global_position) < 1.0 and is_equal_approx(d.fuel, v.fuel):
+			found = true
+	check(found, "el coche se guarda donde lo dejé y con su gasolina")
 
 
 # ------------------------------------------------------------------ construcción (Fase 3)

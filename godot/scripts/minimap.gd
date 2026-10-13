@@ -39,20 +39,24 @@ func _draw() -> void:
 		var d := Vector2(x, z) - origin
 		return center + Vector2(d.x * c - d.y * s, d.x * s + d.y * c) * scale_
 
-	# calles
-	var half: float = world.HALF
-	for r in world.ROADS:
-		draw_line(to_map.call(r, -half), to_map.call(r, half), ROAD, world.ROAD_W * scale_)
-		draw_line(to_map.call(-half, r), to_map.call(half, r), ROAD, world.ROAD_W * scale_)
-	# casas
-	for h in world.houses:
-		var rect: Rect2 = h.rect
-		var pts := PackedVector2Array([
-			to_map.call(rect.position.x, rect.position.y), to_map.call(rect.end.x, rect.position.y),
-			to_map.call(rect.end.x, rect.end.y), to_map.call(rect.position.x, rect.end.y)])
-		draw_colored_polygon(pts, HOUSE)
-		pts.append(pts[0])
-		draw_polyline(pts, INK, 1.5)
+	# calles, caminos y edificios cercanos (del plano del mundo)
+	var view := Rect2(origin - Vector2.ONE * RANGE * 1.5, Vector2.ONE * RANGE * 3.0)
+	var lay: WorldLayout = world.layout
+	for r in lay.roads:
+		if not (r.rect as Rect2).intersects(view):
+			continue
+		var col := ROAD
+		match r.kind:
+			"acera": col = ROAD.lightened(0.25)
+			"camino": col = Color(0.75, 0.68, 0.55)
+			"asfalto": col = ROAD.lightened(0.12)
+		_rect(r.rect, to_map, col, false)
+	for h in lay.houses:
+		if (h.rect as Rect2).intersects(view):
+			_rect(h.rect, to_map, HOUSE, true)
+	for h in lay.halls:
+		if (h.rect as Rect2).intersects(view):
+			_rect(h.rect, to_map, HOUSE.darkened(0.15), true)
 	# lo construido: muros como trazos de tinta, la cama con un cuadro claro
 	for sid in world.structures.by_id:
 		var st: Dictionary = world.structures.by_id[sid]
@@ -73,6 +77,8 @@ func _draw() -> void:
 				draw_line(a1, a2, INK, 3.0)
 	# muebles y maleteros
 	for ct in world.containers:
+		if not view.has_point(Vector2(ct.pos.x, ct.pos.z)) and not ct.corpse:
+			continue
 		var p: Vector2 = to_map.call(ct.pos.x, ct.pos.z)
 		if ct.type == "mochila":
 			if ct.empty:
@@ -103,6 +109,16 @@ func _draw() -> void:
 	# tú, en el centro mirando arriba
 	_arrow(center, 0.0, INK)
 	draw_rect(Rect2(Vector2.ZERO, size), INK, false, 3.0)
+
+
+func _rect(r: Rect2, to_map: Callable, color: Color, outline: bool) -> void:
+	var pts := PackedVector2Array([
+		to_map.call(r.position.x, r.position.y), to_map.call(r.end.x, r.position.y),
+		to_map.call(r.end.x, r.end.y), to_map.call(r.position.x, r.end.y)])
+	draw_colored_polygon(pts, color)
+	if outline:
+		pts.append(pts[0])
+		draw_polyline(pts, INK, 1.5)
 
 
 func _arrow(at: Vector2, angle: float, color: Color) -> void:

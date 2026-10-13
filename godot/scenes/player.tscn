@@ -38,6 +38,12 @@ properties/8/replication_mode = 2
 properties/9/path = NodePath(".:downed")
 properties/9/spawn = true
 properties/9/replication_mode = 2
+properties/10/path = NodePath(".:riding")
+properties/10/spawn = true
+properties/10/replication_mode = 2
+properties/11/path = NodePath(".:seat")
+properties/11/spawn = true
+properties/11/replication_mode = 2
 
 [node name="Player" type="CharacterBody3D"]
 collision_layer = 2
