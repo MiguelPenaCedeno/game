@@ -9,3 +9,8 @@ extends Resource
 ## Botín: cada entrada es [id del objeto, probabilidad 0-1, mínimo, máximo].
 ## Mínimo y máximo son opcionales (por defecto 1).
 @export var loot: Array = []
+
+@export_group("Desmontar")
+## lo que sale al desmontarlo con hacha o martillo (mismo formato que el botín)
+@export var dismantle: Array = []
+@export var dismantle_time := 4.0

@@ -184,6 +184,14 @@ func _process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED or dead:
 		return
+	if not placing.is_empty() and not event is InputEventMouseMotion:
+		if event.is_action_pressed("attack"):
+			_confirm_placing()
+		elif event.is_action_pressed("cancel") or event.is_action_pressed("inventory"):
+			_cancel_placing()
+		elif event.is_action_pressed("rotate"):
+			placing.rot += PI / 4
+		return
 	if event is InputEventMouseMotion:
 		var sens: float = Settings.mouse_sensitivity
 		rotate_y(-event.relative.x * sens)
@@ -197,6 +205,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_attack()
 	elif event.is_action_pressed("interact"):
 		_start_search()
+	elif event.is_action_pressed("throw"):
+		_throw_molotov()
 	elif event.is_action_pressed("flashlight"):
 		flashlight = not flashlight
 		Sfx.play("click")
@@ -285,6 +295,15 @@ func _physics_process(delta: float) -> void:
 		if global_position.distance_to(search.pos) > 0.7:
 			search = {}
 			message.emit("Dejas de registrar.", false)
+		elif search.has("craft"):
+			if search.t >= search.dur:
+				_finish_craft(search.craft)
+				search = {}
+		elif search.has("dismantle"):
+			_noise_spike = maxf(_noise_spike, 10.0)
+			if search.t >= search.dur:
+				_finish_dismantle(search.dismantle)
+				search = {}
 		elif search.has("revive"):
 			var mate: Node3D = search.revive
 			if not is_instance_valid(mate) or not mate.downed:
@@ -302,6 +321,14 @@ func _physics_process(delta: float) -> void:
 			search = {}
 
 	_hurt_flash = maxf(0.0, _hurt_flash - delta)
+	if not placing.is_empty():
+		_update_placing()
+	# pisar el fuego quema
+	if _world.in_fire(global_position):
+		hp -= 12.0 * delta
+		_hurt_flash = 0.3
+		if hp <= 0.0:
+			_zero_hp("Te quemaste en tu propio fuego.")
 
 
 func _update_stats(delta: float, running: bool) -> void:
@@ -347,41 +374,46 @@ func _recalc_weight() -> void:
 	weight = w
 
 
-func use_item(k: String) -> void:
-	if dead:
+## Teclas 1, 2 y 3: comer lo mejor que tengas, beber, vendarte.
+func use_item(slot: String) -> void:
+	if dead or downed:
 		return
-	if k == "comida":
-		if inv.comida <= 0:
-			message.emit("No tienes comida.", true)
+	var options: Array = {"comida": ["guiso", "comida"], "agua": ["agua"], "vendas": ["vendas"]}.get(slot, [slot])
+	for k in options:
+		if inv.get(k, 0) > 0:
+			consume(k)
 			return
-		if hunger > 95:
-			message.emit("No tienes hambre.", false)
-			return
-		inv.comida -= 1
-		Sfx.play("eat")
-		hunger = minf(100.0, hunger + 38.0)
-		message.emit("Comes una lata fría de alubias.", false)
-	elif k == "agua":
-		if inv.agua <= 0:
-			message.emit("No tienes agua.", true)
-			return
-		if thirst > 95:
-			message.emit("No tienes sed.", false)
-			return
-		inv.agua -= 1
-		Sfx.play("eat", 0.0, 1.3)
-		thirst = minf(100.0, thirst + 42.0)
-		message.emit("Bebes media botella de un trago.", false)
-	elif k == "vendas":
-		if inv.vendas <= 0:
-			message.emit("No tienes vendas.", true)
-			return
-		inv.vendas -= 1
-		Sfx.play("pick", 0.0, 0.7)
-		var was := bleeding
+	message.emit({"comida": "No tienes comida.", "agua": "No tienes agua.", "vendas": "No tienes vendas."}.get(slot, "No tienes eso."), true)
+
+
+## Usa una unidad de algo según sus datos (hambre, sed, curación…).
+func consume(k: String) -> void:
+	var it: ItemData = Items.ITEMS[k]
+	if it.hunger > 0 and it.thirst <= 0 and hunger > 95:
+		message.emit("No tienes hambre.", false)
+		return
+	if it.thirst > 0 and it.hunger <= 0 and thirst > 95:
+		message.emit("No tienes sed.", false)
+		return
+	inv[k] -= 1
+	hunger = minf(100.0, hunger + it.hunger)
+	thirst = minf(100.0, thirst + it.thirst)
+	hp = minf(100.0, hp + it.heal)
+	var was := bleeding
+	if it.stops_bleeding:
 		bleeding = false
-		hp = minf(100.0, hp + 18.0)
-		message.emit("Te vendas la herida. Deja de sangrar." if was else "Te cambias las vendas.", false)
+	if it.leaves != "":
+		inv[it.leaves] = inv.get(it.leaves, 0) + 1
+	match k:
+		"comida": message.emit("Comes una lata fría de alubias.", false)
+		"guiso": message.emit("Comes un guiso caliente. Sienta de maravilla.", false)
+		"agua": message.emit("Bebes media botella de un trago.", false)
+		"vendas": message.emit("Te vendas la herida. Deja de sangrar." if was else "Te cambias las vendas.", false)
+		_: message.emit("Usas %s." % it.name.to_lower(), false)
+	if it.category == "medicina":
+		Sfx.play("pick", 0.0, 0.7)
+	else:
+		Sfx.play("eat", 0.0, 1.3 if it.thirst > it.hunger else 1.0)
 	_recalc_weight()
 
 
@@ -665,6 +697,7 @@ func _die(cause: String) -> void:
 	if dead:
 		return
 	downed = false
+	_cancel_placing()
 	hp = 0.0
 	dead = true
 	search = {}
@@ -774,6 +807,213 @@ func _attack_fx() -> void:
 		_world.spawn_word(global_position + (-global_transform.basis.z * 0.8), "pistola", Color(1.0, 0.85, 0.3), 1.4)
 	else:
 		Sfx.play_at("swing", global_position + Vector3.UP * 1.2, -2.0)
+
+
+# ------------------------------------------------------------------ fabricar
+## Estaciones que tienes cerca para fabricar.
+func stations() -> Array[String]:
+	var out: Array[String] = ["manos"]
+	for st in ["banco", "hoguera"]:
+		if _world.structures.near(global_position, st):
+			out.append(st)
+	return out
+
+
+func has_tool() -> bool:
+	for k in owned:
+		if k != "puños" and Items.WEAPONS[k].is_tool:
+			return true
+	return false
+
+
+func start_craft(rid: String) -> void:
+	var r: RecipeData = Items.RECIPES[rid]
+	if not search.is_empty() or dead or downed:
+		return
+	if r.station not in stations():
+		message.emit("Necesitas estar junto a: %s." % {"banco": "un banco de trabajo", "hoguera": "una hoguera"}[r.station], true)
+		return
+	if not Items.can_craft(r, inv, owned):
+		message.emit("Te falta material: %s." % Items.ingredients_text(r), true)
+		return
+	if r.result == "reparar":
+		var w: ItemData = Items.WEAPONS[weapon]
+		if w.dur <= 0 or owned.get(weapon, -1) >= w.dur:
+			message.emit("Lleva en la mano un arma gastada para repararla.", true)
+			return
+	if r.result.begins_with("estructura:"):
+		_start_placing(r)
+		return
+	search = {"craft": r, "t": 0.0, "dur": r.time, "pos": global_position}
+	Sfx.play_at("search", global_position, -4.0, 1.3)
+
+
+func _finish_craft(r: RecipeData) -> void:
+	if not Items.can_craft(r, inv, owned):
+		return
+	_pay(r)
+	if r.result == "reparar":
+		var w: ItemData = Items.WEAPONS[weapon]
+		owned[weapon] = mini(w.dur, owned[weapon] + int(w.dur * 0.5))
+		message.emit("Reparas %s (%d golpes)." % [w.name.to_lower(), owned[weapon]], false)
+	elif Items.WEAPONS.has(r.result):
+		owned[r.result] = Items.WEAPONS[r.result].dur
+		weapon = r.result
+		message.emit("Fabricas %s." % Items.ITEMS[r.result].name.to_lower(), false)
+	else:
+		inv[r.result] = inv.get(r.result, 0) + r.result_count
+		message.emit("Fabricas %s." % ("%d× %s" % [r.result_count, Items.ITEMS[r.result].name] if r.result_count > 1 else Items.ITEMS[r.result].name).to_lower(), false)
+	Sfx.play("pick")
+	_recalc_weight()
+	# si te pasas de peso, lo que sobra se queda en el suelo
+	if weight > Items.CARRY_MAX and not Items.WEAPONS.has(r.result) and r.result != "reparar":
+		var extra := mini(inv[r.result], int(ceil((weight - Items.CARRY_MAX) / Items.kg(r.result))))
+		if extra > 0:
+			_remove_item(r.result, extra)
+			_world.request_drop.rpc_id(1, global_position, {r.result: extra}, "Bulto en el suelo", false)
+			message.emit("No te cabe todo: dejas %d en el suelo." % extra, true)
+
+
+## Gasta los ingredientes de una receta.
+func _pay(r: RecipeData) -> void:
+	for k in r.ingredients:
+		_remove_item(k, int(r.ingredients[k]))
+
+
+# ------------------------------------------------------------------ colocar estructuras
+## {recipe, type, ghost, rot} mientras eliges dónde poner algo
+var placing := {}
+
+
+func _start_placing(r: RecipeData) -> void:
+	var type := r.result.trim_prefix("estructura:")
+	var ghost: Node3D = _world.structures._build(type)
+	ghost.collision_layer = 0
+	for mi in ghost.find_children("*", "MeshInstance3D", true, false):
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color = Color(0.95, 0.9, 0.75, 0.45)
+		(mi as MeshInstance3D).material_override = m
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for l in ghost.find_children("*", "Light3D", true, false):
+		l.queue_free()
+	get_tree().current_scene.add_child(ghost)
+	placing = {"recipe": r, "type": type, "ghost": ghost, "rot": rotation.y, "ok": false}
+	message.emit("Colocar %s: clic para poner, R para girar, clic derecho para cancelar." % Items.RECIPES[r.id].name.to_lower(), false)
+
+
+func _update_placing() -> void:
+	var ghost: Node3D = placing.ghost
+	var fwd := -global_transform.basis.z
+	var p := global_position + fwd * 2.0
+	p = Vector3(snappedf(p.x, 0.25), 0.0, snappedf(p.z, 0.25))
+	ghost.global_position = p
+	ghost.rotation.y = placing.rot
+	# ¿choca con algo?
+	var size: Vector3 = _world.structures.TYPES[placing.type].size
+	var q := PhysicsShapeQueryParameters3D.new()
+	var box := BoxShape3D.new()
+	box.size = size * 0.95
+	q.shape = box
+	q.transform = Transform3D(Basis(Vector3.UP, placing.rot), p + Vector3.UP * (size.y / 2 + 0.05))
+	q.collision_mask = 1 | 2 | 4
+	q.exclude = [get_rid()]
+	var ok := get_world_3d().direct_space_state.intersect_shape(q, 1).is_empty()
+	placing.ok = ok
+	var tint := Color(0.95, 0.9, 0.75, 0.45) if ok else Color(0.9, 0.15, 0.1, 0.45)
+	for mi in ghost.find_children("*", "MeshInstance3D", true, false):
+		((mi as MeshInstance3D).material_override as StandardMaterial3D).albedo_color = tint
+
+
+func _confirm_placing() -> void:
+	if placing.is_empty():
+		return
+	if not placing.ok:
+		message.emit("Ahí no cabe.", true)
+		return
+	var r: RecipeData = placing.recipe
+	if not Items.can_craft(r, inv, owned):
+		_cancel_placing()
+		return
+	_pay(r)
+	_recalc_weight()
+	_world.structures.request_place.rpc_id(1, placing.type, placing.ghost.global_position, placing.rot)
+	_noise_spike = 8.0
+	_cancel_placing()
+
+
+func _cancel_placing() -> void:
+	if placing.has("ghost") and is_instance_valid(placing.ghost):
+		placing.ghost.queue_free()
+	placing = {}
+
+
+# ------------------------------------------------------------------ desmontar
+func start_dismantle(idx: int) -> void:
+	if not search.is_empty() or dead or downed:
+		return
+	if not has_tool():
+		message.emit("Necesitas un hacha o un martillo para desmontarlo.", true)
+		return
+	var c: Dictionary = _world.containers[idx]
+	var cd: ContainerData = Items.CONTAINERS[c.type]
+	search = {"dismantle": idx, "t": 0.0, "dur": cd.dismantle_time, "pos": global_position}
+	message.emit("Desmontando %s… hace ruido." % c.name.to_lower(), false)
+
+
+func _finish_dismantle(idx: int) -> void:
+	_world.request_dismantle.rpc_id(1, idx)
+	_world.spawn_word(_world.containers[idx].pos, "desmontar")
+	shake = maxf(shake, 0.3)
+	# gasta la herramienta (la mejor que lleves)
+	for k in ["martillo", "hacha"]:
+		if owned.has(k):
+			owned[k] -= 3
+			if owned[k] <= 0:
+				message.emit("Tu %s se rompió." % Items.ITEMS[k].name.to_lower(), true)
+				owned.erase(k)
+				if weapon == k:
+					weapon = "puños"
+			break
+	_recalc_weight()
+
+
+# ------------------------------------------------------------------ molotov
+func _throw_molotov() -> void:
+	if inv.get("molotov", 0) <= 0:
+		message.emit("No tienes cócteles molotov (fabrícalos con una botella, alcohol y trapos).", true)
+		return
+	inv.molotov -= 1
+	_recalc_weight()
+	var from := global_position + Vector3.UP * 1.6
+	var dir := -camera.global_transform.basis.z
+	var vel := dir * 13.0 + Vector3.UP * 3.5
+	var p := from
+	var t := 0.0
+	var space := get_world_3d().direct_space_state
+	var land := from
+	while t < 3.0:
+		var nv := vel + Vector3.DOWN * 9.8 * 0.03
+		var np := p + nv * 0.03
+		var q := PhysicsRayQueryParameters3D.create(p, np, LAYER_WORLD | LAYER_ZOMBIES, [get_rid()])
+		var hit := space.intersect_ray(q)
+		t += 0.03
+		if not hit.is_empty():
+			land = hit.position
+			break
+		if np.y <= 0.0:
+			land = Vector3(np.x, 0.0, np.z)
+			break
+		p = np
+		vel = nv
+		land = p
+	land.y = 0.05
+	_noise_spike = 12.0
+	attack_count += 1
+	figure.play_attack(0.5)
+	Sfx.play_at("swing", global_position, 0.0, 0.8)
+	_world.request_fire.rpc_id(1, from, land, t)
 
 
 func hurt_flash() -> float:

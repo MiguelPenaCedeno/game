@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="RecipeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/recipe_data.gd" id="1_recipe"]
+
+[resource]
+script = ExtResource("1_recipe")
+id = "reparar"
+name = "Reparar el arma en la mano"
+station = "banco"
+ingredients = {"cinta": 1, "chatarra": 1}
+result = "reparar"
+result_count = 1
+time = 3.0

@@ -10,3 +10,5 @@ short = "Agua"
 kg = 0.5
 category = "comida"
 description = "Media botella de un trago."
+thirst = 42.0
+leaves = "botella_vacia"

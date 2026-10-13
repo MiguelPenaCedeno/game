@@ -12,6 +12,8 @@ static var WEAPONS := {}
 static var WEAPON_ORDER: Array[String] = []
 ## id -> ContainerData
 static var CONTAINERS := {}
+## id -> RecipeData, en el orden en que se muestran
+static var RECIPES := {}
 
 
 static func _static_init() -> void:
@@ -26,6 +28,11 @@ static func _static_init() -> void:
 		WEAPON_ORDER.append(w.id)
 	for res in _load_dir("res://data/containers/"):
 		CONTAINERS[res.id] = res
+	var recipes := _load_dir("res://data/recipes/")
+	var station_order := {"manos": 0, "banco": 1, "hoguera": 2}
+	recipes.sort_custom(func(a, b): return [station_order[a.station], a.name] < [station_order[b.station], b.name])
+	for r in recipes:
+		RECIPES[r.id] = r
 
 
 static func _load_dir(dir: String) -> Array[Resource]:
@@ -75,3 +82,36 @@ static func describe(loot: Dictionary) -> String:
 		var n: int = loot[k]
 		parts.append("%d× %s" % [n, ITEMS[k].name] if n > 1 else ITEMS[k].name)
 	return ", ".join(parts)
+
+
+## Cuántas unidades tienes de algo (las armas cuentan como 1).
+static func count_of(id: String, inv: Dictionary, owned: Dictionary) -> int:
+	if owned.has(id) and id != "puños":
+		return 1
+	return int(inv.get(id, 0))
+
+
+static func can_craft(r: RecipeData, inv: Dictionary, owned: Dictionary) -> bool:
+	for k in r.ingredients:
+		if count_of(k, inv, owned) < int(r.ingredients[k]):
+			return false
+	return true
+
+
+## Texto de ingredientes: "2× Trapos, 1× Alcohol"
+static func ingredients_text(r: RecipeData) -> String:
+	var parts := PackedStringArray()
+	for k in r.ingredients:
+		parts.append("%d× %s" % [r.ingredients[k], ITEMS[k].short])
+	return ", ".join(parts)
+
+
+## Botín al desmontar un mueble.
+static func roll_dismantle(type: String) -> Dictionary:
+	var out := {}
+	for entry in (CONTAINERS[type] as ContainerData).dismantle:
+		if randf() < entry[1]:
+			var lo: int = entry[2] if entry.size() > 2 else 1
+			var hi: int = entry[3] if entry.size() > 3 else 1
+			out[entry[0]] = out.get(entry[0], 0) + randi_range(lo, hi)
+	return out

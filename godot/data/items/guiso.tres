@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "guiso"
+name = "Guiso caliente"
+short = "Guiso"
+kg = 0.5
+category = "comida"
+description = "Comida cocinada en la hoguera. Llena mucho más."
+hunger = 65.0
+thirst = 10.0
+heal = 5.0

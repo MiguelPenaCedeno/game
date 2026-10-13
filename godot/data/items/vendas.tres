@@ -10,3 +10,5 @@ short = "Vendas"
 kg = 0.05
 category = "medicina"
 description = "Detienen el sangrado y curan un poco."
+heal = 18.0
+stops_bleeding = true

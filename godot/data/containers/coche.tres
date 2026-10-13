@@ -7,4 +7,6 @@ script = ExtResource("1_cont")
 id = "coche"
 name = "Maletero"
 time = 1.8
-loot = [["agua", 0.35, 1, 1], ["comida", 0.3, 1, 1], ["vendas", 0.2, 1, 1], ["bate", 0.06], ["balas", 0.07, 2, 4]]
+loot = [["agua", 0.35, 1, 1], ["comida", 0.3, 1, 1], ["vendas", 0.2, 1, 1], ["bate", 0.06], ["balas", 0.07, 2, 4], ["cinta", 0.3, 1, 1], ["cuerda", 0.3, 1, 1], ["martillo", 0.1], ["botella_vacia", 0.3, 1, 2]]
+dismantle = [["chatarra", 1.0, 3, 5], ["trapos", 0.6, 1, 2]]
+dismantle_time = 6.0

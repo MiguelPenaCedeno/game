@@ -31,9 +31,11 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
 | Clic izquierdo | golpear o disparar |
 | E | registrar muebles y maleteros · mantener junto a un compañero caído para levantarlo |
 | Q | cambiar de arma |
-| 1 · 2 · 3 | comer · beber · vendarte |
+| 1 · 2 · 3 | comer (el guiso primero) · beber · vendarte |
+| 4 | lanzar un cóctel molotov |
+| R / clic derecho | girar / cancelar al colocar una estructura |
 | F | linterna (de noche los zombis te ven de más lejos si la llevas encendida) |
-| Tab | mochila (ver peso y soltar cosas) |
+| Tab | mochila y **fabricar** (ver peso, soltar cosas, recetas) |
 | E (con un mueble abierto) | cerrar la ventana del mueble |
 | Esc | menú |
 
@@ -46,6 +48,14 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
 - **Caer y levantar (cooperativo):** a 0 de salud caes al suelo y tienes 40 s para que tu compañero te levante (manteniendo E a tu lado). Si te siguen mordiendo, el tiempo baja más rápido. Jugando solo, a 0 de salud mueres.
 - **Sonido:** generado por el propio juego (golpes, disparos, pasos, gruñidos, viento, grillos de noche, latido con poca salud). Si pones grabaciones reales en `godot/sounds/` con el mismo nombre (`shot.ogg`, `groan0.wav`…), se usan en su lugar.
 - **Cómic:** onomatopeyas al golpear (¡CRACK!, ¡BANG!, ¡CHOF!), temblor de cámara y una viñeta en blanco y negro puro en los golpes fuertes.
+- **Fabricación:** en la mochila (Tab) está la columna *Fabricar* con lo que puedes hacer según dónde estés:
+  - *a mano*: vendas de trapos, cóctel molotov, lanza, y colocar una **hoguera** o un **banco de trabajo**;
+  - *junto al banco*: bate con clavos, machete, martillo, **caja de almacenaje** y reparar el arma que llevas en la mano;
+  - *junto a la hoguera*: guiso caliente (llena mucho más que una lata) y vendas hervidas.
+  Las recetas son archivos en `godot/data/recipes/`: se pueden cambiar o añadir desde Godot.
+- **Materiales:** tablones, clavos, chatarra, trapos, cuerda, cinta, alcohol y botellas vacías (beber deja la botella). Salen de los muebles y, sobre todo, de **desmontarlos**: abre un mueble o maletero vacío y pulsa *Desmontar* (necesitas hacha o martillo; hace ruido). El mueble desaparece y deja sus materiales en el suelo.
+- **Estructuras:** banco, hoguera y caja se colocan con una vista previa (roja si no cabe). Se ven en los dos equipos y se guardan con la partida. La hoguera alumbra de noche; la caja guarda lo que quieras.
+- **Molotov:** se lanza con 4 hacia donde miras y deja 7 s un charco de fuego que quema zombis… y a ti si lo pisas.
 - **Minimapa** arriba a la derecha: gira contigo. Cuadraditos amarillos = muebles sin registrar, puntos rojos = zombis cercanos, flechas de color = tus compañeros.
 
 ## Jugar online
@@ -117,10 +127,12 @@ godot/
   scripts/save_game.gd guardado de mundo y personaje
   scripts/settings.gd  ajustes (autoload "Settings")
   scripts/sfx.gd       sonidos sintetizados (autoload "Sfx")
+  scripts/structures.gd  estructuras colocadas (banco, hoguera, caja) y fuego
   scripts/mesh_batcher.gd  fusiona mallas para dibujar menos piezas
-  scripts/data/        tipos de datos (ItemData, ContainerData)
+  scripts/data/        tipos de datos (ItemData, ContainerData, RecipeData)
   data/items/          un .tres por objeto: nombre, peso, estadísticas de arma…
-  data/containers/     un .tres por mueble: tiempo de registro y botín
+  data/containers/     un .tres por mueble: tiempo de registro, botín y lo que da al desmontarlo
+  data/recipes/        un .tres por receta: dónde se fabrica, ingredientes y resultado
   tests/               pruebas automáticas
   scripts/world.gd     el pueblo: casas con tejado, vallas, postes, coches, árboles
   shaders/             sombreado de cómic y postproceso de tinta
@@ -142,7 +154,7 @@ mapa **semiprocedural con lugares hechos a mano**, y al morir **la mochila queda
   guardado, ajustes, pausa en solitario, pruebas automáticas y `.exe` automático
 - [x] **Fase 1 · Ambiente:** día y noche con linterna, sonido, onomatopeyas, sensación de golpe,
   caer herido y que tu compañero te levante
-- [ ] **Fase 2 · Fabricación:** desmontar muebles, materiales, banco de trabajo, hoguera, recetas, reparar
+- [x] **Fase 2 · Fabricación:** desmontar muebles, materiales, banco de trabajo, hoguera, caja, recetas, reparar, molotov
 - [ ] **Fase 3 · Refugio:** fortificar casas (barricadas con vida), construcción libre, almacenes,
   cama, hordas cada 7 noches
 - [ ] **Fase 4 · Mundo grande:** mapa por zonas con lugares hechos a mano, casas de dos pisos,

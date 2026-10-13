@@ -33,6 +33,10 @@ var inventory: PanelContainer
 var inv_list: VBoxContainer
 var inv_summary: Label
 var cont_box: VBoxContainer
+var craft_box: VBoxContainer
+var craft_list: VBoxContainer
+var craft_where: Label
+var dismantle_btn: Button
 var cont_title: Label
 var cont_list: VBoxContainer
 ## mueble abierto (-1 si solo miras la mochila) y lo que tiene
@@ -183,6 +187,8 @@ func _process(_delta: float) -> void:
 	slots.comida.text = str(player.inv.comida)
 	slots.agua.text = str(player.inv.agua)
 	slots.vendas.text = str(player.inv.vendas)
+	slots.molotov.text = str(player.inv.get("molotov", 0))
+	slots.comida.text = str(player.inv.comida + player.inv.get("guiso", 0))
 	var w: ItemData = Items.WEAPONS[player.weapon]
 	weapon_slot.text = w.name
 	if w.gun:
@@ -204,6 +210,10 @@ func _process(_delta: float) -> void:
 		progress.value = player.search.t / player.search.dur * 100.0
 		if player.search.has("revive"):
 			prompt.text = "Levantando a %s…" % player.search.revive.display_name
+		elif player.search.has("craft"):
+			prompt.text = "Fabricando %s…" % player.search.craft.name.to_lower()
+		elif player.search.has("dismantle"):
+			prompt.text = "Desmontando %s…" % world.containers[player.search.dismantle].name.to_lower()
 		else:
 			prompt.text = "Registrando %s…" % world.containers[player.search.idx].name.to_lower()
 		prompt_panel.visible = true
@@ -260,6 +270,10 @@ func _refresh_inventory() -> void:
 	if open:
 		var c: Dictionary = world.containers[cont_idx]
 		cont_title.text = c.name.to_upper()
+		var can_dismantle: bool = cont_idx < world._static_count and not c.get("gone", false)
+		dismantle_btn.visible = can_dismantle
+		dismantle_btn.text = "Desmontar (%s)" % ("hacha o martillo" if not player.has_tool() else "%d s, hace ruido" % int(Items.CONTAINERS[c.type].dismantle_time))
+		dismantle_btn.disabled = not player.has_tool()
 		if cont_loot.is_empty():
 			cont_list.add_child(_note("Vacío. Puedes dejar cosas aquí."))
 		var idx := cont_idx
@@ -268,6 +282,46 @@ func _refresh_inventory() -> void:
 			cont_list.add_child(_item_row(k, n, [
 				["Coger 1", func(): player.take(idx, k, 1)],
 				["Todo", func(): player.take(idx, k, n)]]))
+
+	# fabricar (solo mirando la mochila, no con un mueble abierto)
+	craft_box.visible = not open
+	for c in craft_list.get_children():
+		c.queue_free()
+	if not open:
+		var here: Array[String] = player.stations()
+		var names := {"manos": "a mano", "banco": "banco de trabajo", "hoguera": "hoguera"}
+		var where := PackedStringArray()
+		for st in here:
+			where.append(names[st])
+		craft_where.text = "Puedes fabricar: " + ", ".join(where)
+		for rid in Items.RECIPES:
+			var r: RecipeData = Items.RECIPES[rid]
+			if r.station not in here:
+				continue
+			var ok := Items.can_craft(r, player.inv, player.owned)
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 8)
+			var info := VBoxContainer.new()
+			info.add_theme_constant_override("separation", -4)
+			info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var n := Label.new()
+			n.text = r.name
+			info.add_child(n)
+			var ing := Label.new()
+			ing.text = Items.ingredients_text(r)
+			ing.add_theme_font_size_override("font_size", 15)
+			ing.add_theme_color_override("font_color", Color(INK, 0.65) if ok else ACCENT)
+			info.add_child(ing)
+			row.add_child(info)
+			var b := Button.new()
+			b.text = "Colocar" if r.result.begins_with("estructura:") else "Fabricar"
+			b.disabled = not ok
+			b.add_theme_font_size_override("font_size", 17)
+			b.pressed.connect(func():
+				close_panel()
+				player.start_craft(rid))
+			row.add_child(b)
+			craft_list.add_child(row)
 
 	var f := Items.speed_factor(player.weight)
 	inv_summary.text = "Carga: %.1f kg de %d · Velocidad: %d%%%s" % [
@@ -400,6 +454,7 @@ func _build() -> void:
 	slots.comida = _slot(bottom, "1", "Comida")
 	slots.agua = _slot(bottom, "2", "Agua")
 	slots.vendas = _slot(bottom, "3", "Vendas")
+	slots.molotov = _slot(bottom, "4", "Molotov")
 	weapon_slot = _slot(bottom, "Q", "")
 	weapon_info = weapon_slot.get_parent().get_child(2)
 	_slot(bottom, "Tab", "Mochila")
@@ -496,6 +551,12 @@ func _build_inventory() -> void:
 	take_all.text = "Coger todo lo que quepa"
 	take_all.pressed.connect(_take_all)
 	cont_box.add_child(take_all)
+	dismantle_btn = Button.new()
+	dismantle_btn.pressed.connect(func():
+		var idx := cont_idx
+		close_panel()
+		player.start_dismantle(idx))
+	cont_box.add_child(dismantle_btn)
 
 	var inv_box := VBoxContainer.new()
 	inv_box.add_theme_constant_override("separation", 8)
@@ -506,8 +567,34 @@ func _build_inventory() -> void:
 	title.add_theme_font_override("font", FONT_TITLE)
 	title.add_theme_font_size_override("font_size", 30)
 	inv_box.add_child(title)
+	var inv_scroll := ScrollContainer.new()
+	inv_scroll.custom_minimum_size = Vector2(420, 380)
+	inv_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	inv_box.add_child(inv_scroll)
 	inv_list = VBoxContainer.new()
-	inv_box.add_child(inv_list)
+	inv_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inv_scroll.add_child(inv_list)
+
+	craft_box = VBoxContainer.new()
+	craft_box.add_theme_constant_override("separation", 6)
+	craft_box.custom_minimum_size.x = 380
+	cols.add_child(craft_box)
+	var ct := Label.new()
+	ct.text = "FABRICAR"
+	ct.add_theme_font_override("font", FONT_TITLE)
+	ct.add_theme_font_size_override("font_size", 30)
+	craft_box.add_child(ct)
+	craft_where = Label.new()
+	craft_where.add_theme_font_size_override("font_size", 15)
+	craft_where.add_theme_color_override("font_color", Color(INK, 0.65))
+	craft_box.add_child(craft_where)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(380, 360)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	craft_box.add_child(scroll)
+	craft_list = VBoxContainer.new()
+	craft_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(craft_list)
 
 	inv_summary = Label.new()
 	inv_summary.add_theme_color_override("font_color", Color(INK, 0.75))

@@ -16,6 +16,19 @@ extends Resource
 ## modelo 3D para cuando se vea en el mundo o en la mano (opcional)
 @export var model: PackedScene
 
+@export_group("Consumible")
+## lo que recupera al usarlo (comer, beber, curarse)
+@export var hunger := 0.0
+@export var thirst := 0.0
+@export var heal := 0.0
+@export var stops_bleeding := false
+## objeto que queda al usarlo (p. ej. la botella vacía al beber)
+@export var leaves := ""
+
+@export_group("Herramienta")
+## sirve para desmontar muebles y coches
+@export var is_tool := false
+
 @export_group("Arma")
 @export var is_weapon := false
 ## posición en el ciclo de armas (Q)

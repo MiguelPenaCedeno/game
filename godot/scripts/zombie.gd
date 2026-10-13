@@ -234,7 +234,7 @@ func damage(amount: float, knock: Vector3, kind := "puños") -> void:
 		return
 	hp -= amount
 	velocity += knock * 3.0
-	_stagger_t = 0.45 if kind != "puños" else 0.25
+	_stagger_t = 0.0 if kind == "fuego" else (0.45 if kind != "puños" else 0.25)
 	if hp > 0.0:
 		_fx_hit.rpc(global_position, false, kind)
 	# el golpe le hace fijarse en quien le pegó
@@ -264,7 +264,7 @@ func _fx_hit(pos: Vector3, big: bool, kind: String) -> void:
 		var cam := get_viewport().get_camera_3d()
 		if cam and cam.global_position.distance_to(pos) < 12.0:
 			get_tree().call_group("main", "impact", 0.55)
-	if kind != "pistola":
+	if kind != "pistola" and kind != "fuego":
 		Sfx.play_at("hit" if kind == "puños" else "hit_heavy", pos, 0.0 if kind == "puños" else 3.0)
 		if not big:
 			_world.spawn_word(pos, kind, Color(0.98, 0.95, 0.85), 0.9 if kind == "puños" else 1.1)

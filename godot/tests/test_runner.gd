@@ -132,7 +132,7 @@ func _test_solo() -> void:
 	# guardar y cargar
 	main.save_now()
 	var saved := SaveGame.load_world()
-	check(saved.get("bags", []).size() >= 2, "el guardado incluye bulto y cadáver")
+	check(saved.get("dynamic", []).size() >= 2, "el guardado incluye bulto y cadáver")
 	w.reset_containers()
 	w.import_state(saved)
 	check(w.containers.size() == n_before + 2, "al cargar vuelven los bultos")
@@ -166,6 +166,8 @@ func _test_solo() -> void:
 	# en solitario no se cae al suelo: se muere
 	check(not p._teammate_alive(), "jugando solo no hay quien te levante")
 
+	await _test_crafting(p, w)
+
 	# pausa
 	main._set_paused(true)
 	check(get_tree().paused, "Esc pausa el juego en solitario")
@@ -179,8 +181,18 @@ func _test_host() -> void:
 	SaveGame.delete_world()
 	main.new_game_check.button_pressed = true
 	main._on_host_pressed()
+	# antes de que llegue: construyo un banco y desmonto un mueble
+	await _wait(0.5)
+	main.world.structures.request_place("banco", Vector3(6, 0, 10), 0.0)
+	main.world.request_dismantle(5)
+	check(main.world.containers[5].get("gone", false), "desmonto el mueble 5")
 	check(await _wait_until(func(): return main.players.get_child_count() >= 2, 20.0), "se une la otra persona")
 	check(await _wait_until(func(): return main.world.containers[0].empty, 15.0), "veo vacío el mueble que vació ella")
+	check(await _wait_until(func():
+		for c in main.world.containers:
+			if c.type == "caja":
+				return true
+		return false, 10.0), "veo la caja que construyó ella")
 	# ella cae al suelo: voy y la levanto
 	var guest: Node = null
 	for pl in main.players.get_children():
@@ -206,6 +218,13 @@ func _test_client() -> void:
 	check(await _wait_until(func(): return main.zombies.get_child_count() > 0, 15.0), "veo los zombis del anfitrión")
 	var host: Node = main.players.get_node_or_null("1")
 	check(host != null, "veo al anfitrión")
+	var banco_ok := false
+	for sid in main.world.structures.by_id:
+		if main.world.structures.by_id[sid].type == "banco":
+			banco_ok = true
+	check(banco_ok, "veo el banco que ya había construido")
+	check(main.world.containers[5].get("gone", false), "y el mueble que ya había desmontado")
+	main.world.structures.request_place.rpc_id(1, "caja", Vector3(8, 0, 10), 0.0)
 	var p := _me()
 	check(await _open(p, 0), "abro un mueble")
 	await _wait(0.3)
@@ -227,3 +246,134 @@ func _test_client() -> void:
 	check(await _wait_until(func(): return not p.downed, 15.0), "mi compañero me levanta")
 	check(p.hp > 0 and not p.dead, "vuelvo con algo de salud (%d)" % p.hp)
 	await _wait(1.0)
+
+
+# ------------------------------------------------------------------ fabricación (Fase 2)
+func _wait_search(p: Node) -> void:
+	await _wait_until(func(): return p.search.is_empty(), 10.0)
+
+
+func _test_crafting(p: Node, w: Node) -> void:
+	print("-- fabricación --")
+	# que los zombis no molesten
+	for z in main.zombies.get_children():
+		z.set_physics_process(false)
+		z.global_position = Vector3(60, 0, 60)
+	p.global_position = Vector3(0, 0.2, 4)
+	p.rotation.y = 0.0
+	p.hp = 100.0
+	p.inv = {"comida": 0, "agua": 0, "vendas": 0, "balas": 0}
+	p.owned = {"puños": -1}
+	p.weapon = "puños"
+	p._recalc_weight()
+	check(Items.RECIPES.size() >= 12, "hay recetas (%d)" % Items.RECIPES.size())
+
+	# a mano: vendas de trapos
+	p.inv.trapos = 4
+	p.start_craft("vendas_trapos")
+	await _wait_search(p)
+	check(p.inv.vendas == 1 and p.inv.trapos == 2, "vendas de trapos (vendas %d, trapos %d)" % [p.inv.vendas, p.inv.trapos])
+
+	# sin banco no se puede hacer un bate con clavos
+	p.owned["bate"] = 30
+	p.inv.clavos = 20
+	p.start_craft("bate_clavos")
+	check(p.search.is_empty(), "sin banco de trabajo no se fabrica el bate con clavos")
+
+	# colocar un banco
+	p.inv.tablones = 12
+	p._recalc_weight()
+	p.start_craft("banco")
+	check(not p.placing.is_empty(), "entra en modo colocar")
+	await _wait(0.3)
+	check(p.placing.ok, "el sitio está libre")
+	p._confirm_placing()
+	check(await _wait_until(func(): return w.structures.by_id.size() == 1, 3.0), "el banco aparece en el mundo")
+	check(p.inv.tablones == 8 and p.inv.clavos == 10, "cuesta 4 tablones y 10 clavos")
+	check("banco" in p.stations(), "estoy junto al banco")
+
+	# bate con clavos y reparar
+	p.start_craft("bate_clavos")
+	await _wait_search(p)
+	check(p.owned.has("bate_clavos") and not p.owned.has("bate"), "fabrico el bate con clavos (gasta el bate)")
+	p.weapon = "bate_clavos"
+	p.owned.bate_clavos = 5
+	p.inv.cinta = 1
+	p.inv.chatarra = 1
+	p.start_craft("reparar")
+	await _wait_search(p)
+	check(p.owned.bate_clavos > 5, "reparar le devuelve golpes (%d)" % p.owned.bate_clavos)
+
+	# caja de almacenaje
+	p.rotation.y = PI / 2
+	await _wait(0.2)
+	var n_cont: int = w.containers.size()
+	p.inv.clavos = 8
+	p.start_craft("caja")
+	await _wait(0.3)
+	p._confirm_placing()
+	check(await _wait_until(func(): return w.containers.size() == n_cont + 1, 3.0), "la caja es un contenedor más")
+	var caja_idx: int = w.containers.size() - 1
+	check(w.containers[caja_idx].type == "caja", "de tipo caja")
+	p.inv.comida = 3
+	p.put(caja_idx, "comida", 3)
+	await _wait(0.2)
+	check(int(w.containers[caja_idx].loot.get("comida", 0)) == 3, "guardo 3 latas en la caja")
+
+	# guardado: estructuras y caja con su contenido
+	main.save_now()
+	var saved := SaveGame.load_world()
+	w.reset_containers()
+	check(w.structures.by_id.is_empty(), "al reiniciar no quedan estructuras")
+	w.import_state(saved)
+	check(w.structures.by_id.size() == 2, "al cargar vuelven el banco y la caja")
+	var caja_ok := false
+	for c in w.containers:
+		if c.type == "caja" and int(c.loot.get("comida", 0)) == 3:
+			caja_ok = true
+	check(caja_ok, "y la caja conserva lo que tenía")
+
+	# hoguera y guiso
+	p.inv.trapos = 2
+	p.rotation.y = PI
+	await _wait(0.2)
+	p.start_craft("hoguera")
+	await _wait(0.3)
+	p._confirm_placing()
+	await _wait(0.3)
+	check("hoguera" in p.stations(), "hay hoguera cerca")
+	p.inv.comida = 2
+	p.inv.agua = 1
+	p.start_craft("guiso")
+	await _wait_search(p)
+	check(p.inv.get("guiso", 0) == 2, "cocino 2 guisos")
+	p.hunger = 20.0
+	p.use_item("comida")
+	check(p.hunger >= 84.0, "el guiso llena mucho (hambre %d)" % p.hunger)
+
+	# desmontar un armario
+	var idx := -1
+	for i in w._static_count:
+		if w.containers[i].type == "armario" and not w.containers[i].get("gone", false):
+			idx = i
+			break
+	p.owned["martillo"] = 80
+	var bags_before: int = w.containers.size()
+	p.start_dismantle(idx)
+	check(not p.search.is_empty(), "empiezo a desmontar con el martillo")
+	await _wait_search(p)
+	await _wait(0.3)
+	check(w.containers[idx].get("gone", false), "el armario desaparece")
+	var restos: Dictionary = w.containers[w.containers.size() - 1]
+	check(w.containers.size() == bags_before + 1 and int(restos.loot.get("tablones", 0)) >= 3, "deja tablones en el suelo (%s)" % str(restos.loot))
+	check(p.owned.martillo < 80, "el martillo se desgasta")
+
+	# molotov
+	p.inv.molotov = 1
+	p._throw_molotov()
+	check(p.inv.molotov == 0, "lanzo el molotov")
+	var z: Node = main.zombies.get_child(1)
+	var land: Vector3 = p.global_position + Vector3(0, 0, 8)
+	z.global_position = land
+	w.request_fire(p.global_position, land, 0.1)
+	check(await _wait_until(func(): return z.dead, 8.0), "el fuego mata al zombi")

@@ -66,6 +66,8 @@ var _nav_region: NavigationRegion3D
 var _fx: Node3D
 var _fx_items: Array[Node3D] = []
 var _bags: Node3D
+## World/Estructuras: lo que construyen los jugadores
+var structures: Node3D
 var _sun: DirectionalLight3D
 var _env: Environment
 
@@ -111,9 +113,14 @@ func _ready() -> void:
 	_bags.name = "Bultos"
 	add_child(_bags)
 	_static_count = containers.size()
+	structures = Node3D.new()
+	structures.set_script(preload("res://scripts/structures.gd"))
+	structures.name = "Estructuras"
+	add_child(structures)
 
 
 func _process(delta: float) -> void:
+	_process_fires(delta)
 	if not clock_running:
 		return
 	game_minutes += delta * MIN_PER_SEC
@@ -211,7 +218,7 @@ func container_index_near(pos: Vector3, forward: Vector3, max_dist := 2.2) -> in
 	var best_score := INF
 	for i in containers.size():
 		var c: Dictionary = containers[i]
-		if c.type == "mochila" and c.empty:
+		if (c.type == "mochila" and c.empty) or c.get("gone", false):
 			continue
 		var to: Vector3 = c.pos - pos
 		to.y = 0
@@ -396,42 +403,65 @@ func _add_bag(idx: int, pos: Vector3, label: String, corpse: bool) -> void:
 	})
 
 
-## Al unirse alguien, el anfitrión le pasa los bultos que hay y qué muebles están vacíos.
+## Al unirse alguien, el anfitrión le pasa los bultos, cajas, estructuras,
+## muebles desmontados y vacíos, y la hora. Los contenedores nuevos van en el
+## mismo orden que en el anfitrión para que los números coincidan.
 func send_state_to(peer: int) -> void:
-	var bags := []
+	structures.send_state_to(peer)
+	var dyn := []
 	for i in range(_static_count, containers.size()):
 		var c: Dictionary = containers[i]
-		bags.append([i, c.pos, c.name, c.corpse])
+		if c.type == "caja":
+			var st: Dictionary = structures.by_id[c.sid]
+			dyn.append(["caja", i, c.sid, st.pos, st.rot])
+		else:
+			dyn.append(["bolsa", i, c.pos, c.name, c.corpse])
 	var empties := PackedInt32Array()
+	var gone := PackedInt32Array()
 	for i in containers.size():
 		if containers[i].empty:
 			empties.append(i)
-	_sync_state.rpc_id(peer, bags, empties, game_minutes)
+		if containers[i].get("gone", false):
+			gone.append(i)
+	_sync_state.rpc_id(peer, dyn, empties, gone, game_minutes)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _sync_state(bags: Array, empties: PackedInt32Array, minutes: float) -> void:
+func _sync_state(dyn: Array, empties: PackedInt32Array, gone: PackedInt32Array, minutes: float) -> void:
 	set_time(minutes)
-	for b in bags:
-		if b[0] == containers.size():
-			_add_bag(b[0], b[1], b[2], b[3])
+	for d in dyn:
+		if d[1] != containers.size():
+			continue
+		if d[0] == "caja":
+			structures._add(d[2], "caja", d[3], d[4], d[1])
+		else:
+			_add_bag(d[1], d[2], d[3], d[4])
 	for i in empties:
 		set_container_empty(i, true)
+	for i in gone:
+		_set_gone(i)
 
 
 ## Estado del mundo para el guardado (solo en el anfitrión).
 func export_state() -> Dictionary:
 	var conts := {}
+	var gone := []
 	for i in _static_count:
 		var c: Dictionary = containers[i]
 		if c.get("rolled", false):
 			conts[i] = c.loot.duplicate()
-	var bags := []
+		if c.get("gone", false):
+			gone.append(i)
+	var dyn := []
 	for i in range(_static_count, containers.size()):
 		var c: Dictionary = containers[i]
-		if not c.loot.is_empty():
-			bags.append({"pos": c.pos, "name": c.name, "corpse": c.corpse, "loot": c.loot.duplicate()})
-	return {"containers": conts, "bags": bags, "minutes": game_minutes}
+		if c.type == "caja":
+			var st: Dictionary = structures.by_id[c.sid]
+			dyn.append({"kind": "caja", "sid": c.sid, "pos": st.pos, "rot": st.rot, "loot": c.loot.duplicate()})
+		elif not c.loot.is_empty():
+			dyn.append({"kind": "bolsa", "pos": c.pos, "name": c.name, "corpse": c.corpse, "loot": c.loot.duplicate()})
+	return {"containers": conts, "dynamic": dyn, "gone": gone, "structures": structures.export_state(),
+		"minutes": game_minutes}
 
 
 func import_state(d: Dictionary) -> void:
@@ -445,17 +475,32 @@ func import_state(d: Dictionary) -> void:
 			c.rolled = true
 			if c.loot.is_empty():
 				set_container_empty(i, true)
+	for i in d.get("gone", []):
+		if i < _static_count:
+			_set_gone(i)
+	structures.import_state(d.get("structures", []))
+	# "bags" es el formato de antes de la Fase 2
+	var dyn: Array = d.get("dynamic", [])
 	for b in d.get("bags", []):
+		dyn.append({"kind": "bolsa", "pos": b.pos, "name": b.name, "corpse": b.corpse, "loot": b.loot})
+	for e in dyn:
 		var idx := containers.size()
-		_add_bag(idx, b.pos, b.name, b.corpse)
-		containers[idx].loot = b.loot
+		if e.kind == "caja":
+			structures._add(e.sid, "caja", e.pos, e.rot, idx)
+		else:
+			_add_bag(idx, e.pos, e.name, e.corpse)
+		containers[idx].loot = e.loot
 		containers[idx].rolled = true
+		set_container_empty(idx, e.loot.is_empty())
 
 
 func reset_containers() -> void:
 	set_time(START_MINUTES)
+	if structures:
+		structures.clear()
 	for c in containers.slice(_static_count):
-		c.node.queue_free()
+		if is_instance_valid(c.node):
+			c.node.queue_free()
 	containers.resize(_static_count)
 	for i in containers.size():
 		var c: Dictionary = containers[i]
@@ -463,8 +508,121 @@ func reset_containers() -> void:
 		c.erase("rolled")
 		c.erase("viewers")
 		c.erase("seen")
+		if c.get("gone", false):
+			c.erase("gone")
+			c.hidden_node.visible = true
+			c.node.collision_layer = 1
 		if c.empty:
 			set_container_empty(i, false)
+	fires.clear()
+
+
+## Caja de almacenaje construida: un contenedor más (vacío al principio).
+func add_box_container(node: Node3D, idx: int, sid: int) -> void:
+	if idx >= 0 and idx != containers.size():
+		push_warning("Índice de caja desincronizado: %d vs %d" % [idx, containers.size()])
+	var mesh: MeshInstance3D = node.find_children("*", "MeshInstance3D", false, false)[0]
+	containers.append({
+		"node": node, "mesh": mesh, "type": "caja", "name": "Caja de almacenaje",
+		"pos": node.global_position, "empty": true, "color": Color(0.48, 0.35, 0.22), "corpse": false,
+		"sid": sid, "loot": {}, "rolled": true,
+	})
+	set_container_empty(containers.size() - 1, true)
+
+
+# ------------------------------------------------------------------ desmontar
+## Desmontar un mueble o coche: desaparece y deja sus materiales (y lo que
+## tuviera dentro) en un montón en el suelo.
+@rpc("any_peer", "call_local", "reliable")
+func request_dismantle(idx: int) -> void:
+	if not multiplayer.is_server() or idx < 0 or idx >= _static_count:
+		return
+	var c: Dictionary = containers[idx]
+	if c.get("gone", false):
+		return
+	_ensure_rolled(c)
+	var items := Items.roll_dismantle(c.type)
+	for k in c.loot:
+		items[k] = int(items.get(k, 0)) + int(c.loot[k])
+	c.loot = {}
+	_set_gone.rpc(idx)
+	var drop_pos: Vector3 = c.pos
+	drop_pos.y = 0
+	request_drop(drop_pos, items, "Restos de %s" % c.name.to_lower(), false)
+
+
+@rpc("authority", "call_local", "reliable")
+func _set_gone(idx: int) -> void:
+	var c: Dictionary = containers[idx]
+	c.gone = true
+	c.empty = true
+	c.loot = {}
+	# un coche desmontado se va entero, no solo su carrocería
+	var node: Node3D = c.node
+	var target: Node3D = node.get_parent() if c.type == "coche" else node
+	target.visible = false
+	c.hidden_node = target
+	(node as StaticBody3D).collision_layer = 0
+	Sfx.play_at("hit_heavy", c.pos, 0.0, 0.6)
+
+
+# ------------------------------------------------------------------ fuego (molotov)
+## Fuegos activos: {pos, until}. Todos los equipos la tienen (para quemarse);
+## el anfitrión además quema zombis.
+var fires: Array[Dictionary] = []
+const FIRE_RADIUS := 2.4
+const FIRE_TIME := 7.0
+var _fire_tick := 0.0
+
+
+@rpc("any_peer", "call_local", "reliable")
+func request_fire(from: Vector3, land: Vector3, flight: float) -> void:
+	if not multiplayer.is_server():
+		return
+	_throw_fx.rpc(from, land, flight)
+
+
+@rpc("authority", "call_local", "reliable")
+func _throw_fx(from: Vector3, land: Vector3, flight: float) -> void:
+	# la botella vuela en arco y al romperse prende el suelo
+	var bottle := _box(from, Vector3(0.1, 0.24, 0.1), Color(0.35, 0.45, 0.3), false, _fx)
+	var tw := bottle.create_tween()
+	tw.tween_method(func(t: float):
+		bottle.position = from.lerp(land, t) + Vector3.UP * sin(t * PI) * 2.0
+		bottle.rotation.x = t * 12.0, 0.0, 1.0, flight)
+	tw.tween_callback(func():
+		bottle.queue_free()
+		_ignite(land))
+
+
+func _ignite(pos: Vector3) -> void:
+	fires.append({"pos": pos, "until": Time.get_ticks_msec() + int(FIRE_TIME * 1000)})
+	structures.spawn_fire_fx(pos, FIRE_TIME)
+	Sfx.play_at("shot", pos, -2.0, 0.45)
+	Sfx.play_at("search", pos, 4.0, 0.5)
+	spawn_word(pos, "fuego", Color(1.0, 0.55, 0.15), 1.4)
+
+
+## ¿Hay fuego en esta posición? (para quemar a quien lo pise)
+func in_fire(pos: Vector3) -> bool:
+	for f in fires:
+		if Vector2(f.pos.x - pos.x, f.pos.z - pos.z).length() < FIRE_RADIUS:
+			return true
+	return false
+
+
+func _process_fires(delta: float) -> void:
+	var now := Time.get_ticks_msec()
+	fires = fires.filter(func(f): return f.until > now)
+	if fires.is_empty() or not multiplayer.is_server():
+		return
+	_fire_tick += delta
+	if _fire_tick < 0.5:
+		return
+	_fire_tick = 0.0
+	for z in get_tree().get_nodes_in_group("zombies"):
+		if not z.dead and in_fire(z.global_position):
+			z.damage(1.6, Vector3.ZERO, "fuego")
 
 
 func _register_container(body: Node3D, type: String, color: Color) -> void:
@@ -485,6 +643,8 @@ const WORDS := {
 	"pistola": ["¡BANG!"],
 	"muerte": ["¡CHOF!", "¡PLOF!"],
 	"herido": ["¡AGH!", "¡AY!", "¡ARGH!"],
+	"fuego": ["¡FUUUSH!", "¡FLAMM!"],
+	"desmontar": ["¡CRAC!", "¡ÑIIIC!", "¡CLONC!"],
 }
 
 
@@ -870,6 +1030,9 @@ func _build_cars() -> void:
 func _build_car(pos: Vector3, along_x: bool, color: Color) -> void:
 	var car := Node3D.new()
 	car.name = "Coche"
+	# cada coche se fusiona aparte: al desmontarlo desaparece entero
+	car.add_to_group("dynamic")
+	_cars.append(car)
 	car.position = pos
 	car.rotation.y = (0.0 if along_x else PI / 2) + rng.randf_range(-0.3, 0.3)
 	add_child(car)
@@ -988,6 +1151,7 @@ func _build_bounds() -> void:
 # ------------------------------------------------------------------ fusión de geometría
 const CHUNK := 24.0
 var _batch_mats := {}
+var _cars: Array[Node3D] = []
 
 
 ## Une todas las piezas que no cambian nunca en pocas mallas grandes por zona,
@@ -1035,6 +1199,16 @@ func _batch_static() -> void:
 	geo.name = "Geometria"
 	add_child(geo)
 	batcher.build(geo, "Zona")
+	for car in _cars:
+		var cb := MeshBatcher.new()
+		for mi in car.get_children():
+			if mi is MeshInstance3D:
+				var m := mi.material_override as ShaderMaterial
+				var g: float = m.get_shader_parameter("grit")
+				var gs: float = m.get_shader_parameter("grit_scale")
+				cb.add(mi.mesh, mi.transform, [g, gs], _batch_mat(g, gs), m.get_shader_parameter("albedo"))
+				to_free.append(mi)
+		cb.build(car, "Carroceria")
 	for n in to_free:
 		if is_instance_valid(n):
 			n.free()

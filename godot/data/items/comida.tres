@@ -10,3 +10,4 @@ short = "Comida"
 kg = 0.4
 category = "comida"
 description = "Alubias frías. Quita bastante hambre."
+hunger = 38.0
