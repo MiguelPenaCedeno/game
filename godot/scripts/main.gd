@@ -179,7 +179,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		hud.close_all()
 	elif event is InputEventMouseButton and event.pressed and not pause_panel.visible and not hud.is_blocking() \
 			and not Settings.touch_active():
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		Settings.capture_mouse(true)
 
 
 # ------------------------------------------------------------------ acciones del menú
@@ -187,11 +187,17 @@ func _on_solo_pressed() -> void:
 	Diag.mark("menú: solo")
 	Network.player_name = _chosen_name()
 	Network.play_solo()
+	Diag.mark("partida: preparando el mundo")
 	_prepare_world()
+	Diag.mark("partida: empieza")
 	_start_game()
+	Diag.mark("partida: tu personaje")
 	_add_player(1)
+	Diag.mark("partida: coches")
 	_spawn_vehicles()
+	Diag.mark("partida: zombis")
 	_start_zombies()
+	Diag.mark("partida: lista")
 
 
 func _on_host_pressed() -> void:
@@ -280,7 +286,8 @@ func _start_game() -> void:
 	menu_panel.visible = false
 	hud.visible = true
 	status_label.text = ""
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	Settings.capture_mouse(true)
+	Diag.watch_frames(12)
 
 
 func _back_to_menu(message: String) -> void:
@@ -308,7 +315,7 @@ func _back_to_menu(message: String) -> void:
 	menu_panel.visible = true
 	status_label.text = message
 	_refresh_save_info()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	Settings.capture_mouse(false)
 
 
 func _set_paused(open: bool) -> void:
@@ -319,7 +326,7 @@ func _set_paused(open: bool) -> void:
 	# jugando solo se detiene todo; con otra persona conectada el mundo sigue
 	pause_panel.visible = open
 	get_tree().paused = open and not Network.is_online()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	Settings.capture_mouse(not open)
 
 
 func _chosen_name() -> String:

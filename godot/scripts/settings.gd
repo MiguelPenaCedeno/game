@@ -55,6 +55,14 @@ static func is_mobile() -> bool:
 	return OS.has_feature("mobile") or OS.has_feature("android")
 
 
+## Atrapa (o suelta) el ratón para mirar con él. En el móvil no se toca: allí
+## no hay ratón, y pedirle a Android que lo atrape puede cerrar la app.
+func capture_mouse(on: bool) -> void:
+	if is_mobile():
+		return
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
+
+
 ## ¿Se muestran los controles táctiles?
 func touch_active() -> bool:
 	if touch_controls == 1:

@@ -21,6 +21,7 @@ var _lines := 0
 var _t0 := 0
 var _beat := 0.0
 var _frames := 0
+var _watch := 0
 var _mutex := Mutex.new()
 
 
@@ -64,18 +65,26 @@ func _write(text: String) -> void:
 	_lines += 1
 
 
+## Apunta cada uno de los próximos fotogramas (al empezar una partida, para ver hasta dónde llega).
+func watch_frames(n: int) -> void:
+	_watch = n
+
+
 func _process(delta: float) -> void:
 	_frames += 1
 	if _frames == 3:
 		mark("ya dibuja (primeros fotogramas hechos)")
+	if _watch > 0:
+		_watch -= 1
+		mark("fotograma  fps=%d  objetos=%d  zombis=%d" % [Engine.get_frames_per_second(),
+			int(Performance.get_monitor(Performance.OBJECT_COUNT)), get_tree().get_nodes_in_group("zombies").size()])
 	# un latido cada pocos segundos: si se cierra, se ve hasta cuándo iba bien
 	_beat += delta
 	if _beat >= 2.0:
 		_beat = 0.0
 		var mem: Dictionary = OS.get_memory_info()
-		mark("vivo  fps=%d  memoria=%d MB  gpu=%d MB  objetos=%d" % [
+		mark("vivo  fps=%d  gpu=%d MB  objetos=%d" % [
 			Engine.get_frames_per_second(),
-			int(OS.get_static_memory_usage() / 1048576.0),
 			int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0),
 			int(Performance.get_monitor(Performance.OBJECT_COUNT)),
 		] + ("  libre=%d MB" % int(mem.get("available", 0) / 1048576.0) if mem.get("available", -1) > 0 else ""))

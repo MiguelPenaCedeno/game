@@ -136,20 +136,21 @@ func show_note(k: String) -> void:
 
 ## Hoja de papel con un texto (notas, mensajes de radio).
 func show_paper(title: String, text: String) -> void:
+	Diag.mark("papel: " + title)
 	if inventory.visible:
 		close_panel()
 	note_title.text = title.to_upper()
 	note_text.text = text
 	note_panel.visible = true
 	Sfx.play("search", -6.0, 1.8)
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	Settings.capture_mouse(false)
 	focus_open_panel.call_deferred()
 
 
 func close_note() -> void:
 	note_panel.visible = false
 	if player and not player.dead and not is_blocking():
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		Settings.capture_mouse(true)
 
 
 func _build_note() -> void:
@@ -198,13 +199,13 @@ func toggle_map() -> void:
 		close_panel()
 	paper_map.open()
 	Sfx.play("search", -8.0, 1.6)
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	Settings.capture_mouse(false)
 
 
 func close_map() -> void:
 	paper_map.visible = false
 	if player and not player.dead:
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		Settings.capture_mouse(true)
 
 
 func toggle_inventory() -> void:
@@ -216,7 +217,7 @@ func toggle_inventory() -> void:
 	cont_idx = -1
 	inventory.visible = true
 	_refresh_inventory()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	Settings.capture_mouse(false)
 
 
 ## Se abrió un mueble: mochila a la derecha, mueble a la izquierda.
@@ -227,7 +228,7 @@ func open_container(idx: int, loot: Dictionary) -> void:
 	cont_loot = loot
 	inventory.visible = true
 	_refresh_inventory()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	Settings.capture_mouse(false)
 
 
 func close_panel() -> void:
@@ -236,7 +237,7 @@ func close_panel() -> void:
 	cont_idx = -1
 	inventory.visible = false
 	if player and not player.dead:
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		Settings.capture_mouse(true)
 
 
 func is_container_open() -> bool:
@@ -612,7 +613,7 @@ func _on_died(cause: String) -> void:
 			return  # ya reapareció
 		death.visible = true
 		focus_open_panel.call_deferred()
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE)
+		Settings.capture_mouse(false))
 
 
 # ------------------------------------------------------------------ construcción
@@ -869,7 +870,7 @@ func _build_death() -> void:
 	again.text = "Intentarlo otra vez"
 	again.pressed.connect(func():
 		death.visible = false
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		Settings.capture_mouse(true)
 		respawn_requested.emit())
 	box.add_child(again)
 	var leave := Button.new()
