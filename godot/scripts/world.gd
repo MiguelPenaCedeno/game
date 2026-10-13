@@ -240,7 +240,7 @@ func _bake_tile(t: Vector2i) -> void:
 	entry.nav = region
 	(entry.root as Node3D).add_child(region)
 	region.bake_finished.connect(func(): entry.nav_ready = true)
-	region.bake_navigation_mesh(true)
+	region.bake_navigation_mesh(Settings.threaded_loading)
 
 
 ## ¿Hay malla de navegación lista en ese punto?
@@ -290,7 +290,12 @@ func update_streaming() -> void:
 	if want.is_empty():
 		return
 	want.sort_custom(func(x, y): return x[0] < y[0])
+	if not Settings.threaded_loading:
+		Diag.mark("zona %s: construyendo (sin hilo)" % want[0][1])
+		_load_tile(want[0][1])
+		return
 	_task_tile = want[0][1]
+	Diag.mark("zona %s: construyendo en otro hilo" % _task_tile)
 	_task = WorkerThreadPool.add_task(func(): _task_root = builder.build(_task_tile), false, "Zona")
 
 
@@ -347,6 +352,7 @@ func _attach_tile(t: Vector2i, node: Node3D) -> void:
 	if nav_enabled:
 		_bake_tile(t)
 	tile_loaded.emit(t)
+	Diag.mark("zona %s: en el mundo (%d zonas)" % [t, tiles.size()])
 
 
 func _unload_tile(t: Vector2i) -> void:

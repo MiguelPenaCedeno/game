@@ -81,6 +81,9 @@ jobs:
           cd godot
           ~/godot/godot --headless --export-release "Android" ../builds/PuebloMuerto-android.apk
           test -s ../builds/PuebloMuerto-android.apk
+          # la misma app con gráficos OpenGL, para móviles a los que Vulkan les da problemas
+          ~/godot/godot --headless --export-release "Android (compatible)" ../builds/PuebloMuerto-android-compatible.apk
+          test -s ../builds/PuebloMuerto-android-compatible.apk
           ls -la ../builds
 
       - name: Guardar los ejecutables en esta ejecución
@@ -90,6 +93,7 @@ jobs:
           path: |
             builds/PuebloMuerto-windows.zip
             builds/PuebloMuerto-android.apk
+            builds/PuebloMuerto-android-compatible.apk
 
       - name: Publicar en "Releases" (versión más reciente)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -110,8 +114,11 @@ jobs:
 
             **Cómo jugar en Android:** descarga `PuebloMuerto-android.apk` en el móvil y ábrelo. Android pedirá permiso
             para instalar apps de origen desconocido (solo la primera vez). Se juega con controles táctiles o con un mando.
+            Si el juego se cierra solo en tu móvil, prueba `PuebloMuerto-android-compatible.apk` (gráficos OpenGL,
+            se instala encima de la otra y conserva la partida). Al volver a abrirlo, el juego enseña un informe para copiarlo.
 
             Para jugar juntos, uno pulsa *Crear partida* y el otro se une con su IP (mira el LEEME.md).
           files: |
             builds/PuebloMuerto-windows.zip
             builds/PuebloMuerto-android.apk
+            builds/PuebloMuerto-android-compatible.apk

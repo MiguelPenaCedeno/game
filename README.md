@@ -29,6 +29,19 @@ vez). Las versiones nuevas se instalan encima sin perder la partida.
   resolución 3D y sombras bajas. Se cambia en *Ajustes*.
 - Online igual que en PC: con Tailscale instalado en el móvil (app oficial) usa la IP `100.x`.
 
+### Si el juego se cierra solo en el móvil
+
+1. Vuelve a abrirlo: saldrá **"El juego se cerró de golpe"** con un informe (qué móvil, qué
+   gráficos y qué estaba haciendo el juego justo antes). Pulsa **Copiar informe** y pégalo en
+   un mensaje para quien lo esté arreglando.
+2. Pulsa **Seguir en modo seguro**: quita sombras y filtro de cómic, baja la resolución y carga
+   el mapa sin hilos. Cada cosa se puede volver a activar en *Ajustes* para ver cuál fallaba.
+3. Si sigue cerrándose, instala **`PuebloMuerto-android-compatible.apk`** (también en Releases):
+   es el mismo juego con gráficos OpenGL en vez de Vulkan, que algunos móviles llevan mejor. Se
+   instala encima de la otra y conserva la partida.
+
+El informe se puede ver en cualquier momento en *Ajustes → Informe de errores*.
+
 ## Abrir el proyecto
 
 1. Descarga **Godot 4.7** (versión estándar, no la .NET) desde <https://godotengine.org/download>.

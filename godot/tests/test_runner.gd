@@ -189,6 +189,7 @@ func _test_solo() -> void:
 	await _test_story(p, w)
 	await _test_difficulty(p, w)
 	await _test_pad_and_touch(p, w)
+	await _test_safe_mode(p, w)
 
 	# pausa
 	main._set_paused(true)
@@ -884,6 +885,40 @@ func _test_difficulty(p: Node, w: Node) -> void:
 	main.save_now()
 	check(SaveGame.load_world().get("difficulty", "") == "pesadilla", "la dificultad se guarda con la partida")
 	w.set_difficulty("normal")
+
+
+func _test_safe_mode(p: Node, w: Node) -> void:
+	print("-- modo seguro e informe --")
+	Diag.mark("prueba del informe")
+	var rep: String = Diag.report()
+	check("ESTE APARATO" in rep and "Gráficos:" in rep, "el informe dice qué aparato y qué gráficos hay")
+	check("prueba del informe" in FileAccess.get_file_as_string(Diag.PATH), "lo que pasa se apunta en el disco al momento")
+	var keep := {}
+	for k in Settings.KEYS:
+		keep[k] = Settings.get(k)
+	Settings.safe_mode()
+	check(Settings.shadows == 0 and not Settings.threaded_loading and not main._ink_quad.visible,
+		"el modo seguro quita sombras, filtro de cómic e hilos")
+	# sin hilos el mapa se sigue construyendo al moverse
+	var back: Vector3 = p.global_position
+	var far := Vector3(-15.5, 0.3, 210)
+	var ft := WorldLayout.tile_of(far.x, far.z)
+	for z in main.zombies.get_children():
+		z.queue_free()
+	p.global_position = far
+	var threads := [false]
+	var ok := await _wait_until(func():
+		if w._task != -1:
+			threads[0] = true
+		return w.tiles.has(ft) and w.nav_ready_at(far), 15.0)
+	check(ok and not threads[0], "sin hilos se construye la zona y su navegación")
+	for k in keep:
+		Settings.set(k, keep[k])
+	Settings.apply()
+	Settings.save()
+	check(main._ink_quad.visible, "y al volver a los ajustes de antes vuelve la tinta")
+	p.global_position = back
+	await _wait(0.5)
 
 
 func _joy_axis(axis: int, value: float) -> void:

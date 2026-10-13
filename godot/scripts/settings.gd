@@ -28,9 +28,14 @@ var difficulty := "normal"
 var touch_controls := 0
 ## velocidad de la cámara con el stick derecho del mando
 var pad_sensitivity := 2.6
+## el filtro de cómic (tinta y papel) por encima de todo
+var ink_effect := true
+## construir las zonas del mapa en otro hilo (más fluido; desactivar si el móvil se cierra)
+var threaded_loading := true
 
 const KEYS := ["mouse_sensitivity", "invert_y", "fov", "fullscreen", "vsync", "render_scale",
-	"shadows", "line_width", "hatching", "grain", "volume", "difficulty", "touch_controls", "pad_sensitivity"]
+	"shadows", "line_width", "hatching", "grain", "volume", "difficulty", "touch_controls", "pad_sensitivity",
+	"ink_effect", "threaded_loading"]
 
 
 func _ready() -> void:
@@ -57,6 +62,16 @@ func touch_active() -> bool:
 	if touch_controls == 2:
 		return false
 	return is_mobile() or DisplayServer.is_touchscreen_available()
+
+
+## Lo más sencillo para la tarjeta gráfica: para móviles que se cierran solos.
+func safe_mode() -> void:
+	shadows = 0
+	ink_effect = false
+	threaded_loading = false
+	render_scale = minf(render_scale, 0.6)
+	apply()
+	save()
 
 
 func set_value(key: String, value: Variant) -> void:

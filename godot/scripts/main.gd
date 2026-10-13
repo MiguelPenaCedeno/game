@@ -59,6 +59,11 @@ var _autosave: Timer
 var settings_panel: CenterContainer
 var _settings_return: Control
 var _ink_mat: ShaderMaterial
+var _ink_quad: MeshInstance3D
+## informe de errores (se abre solo si la última vez el juego se cerró de golpe)
+var report_panel: CenterContainer
+var _report_text: TextEdit
+var _report_return: Control
 var _zombie_counter := 0
 var _zombie_timer: Timer
 
@@ -71,6 +76,7 @@ func _ready() -> void:
 	for n in [world, players, zombies]:
 		n.process_mode = Node.PROCESS_MODE_PAUSABLE
 	world.night_changed.connect(_on_night_changed)
+	Diag.mark("menú: mundo de fondo cargado")
 	_add_ink_pass()
 	_build_ui()
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -79,6 +85,8 @@ func _ready() -> void:
 	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 	_handle_cmdline()
+	if Diag.crashed_last_time:
+		_show_crash_report()
 
 
 func _process(_delta: float) -> void:
@@ -123,7 +131,7 @@ func gameplay_input() -> bool:
 func _focus_visible_panel() -> void:
 	if not pad_mode:
 		return
-	for panel in [settings_panel, pause_panel, menu_panel]:
+	for panel in [report_panel, settings_panel, pause_panel, menu_panel]:
 		if panel and panel.visible:
 			focus_first(panel)
 			return
@@ -176,6 +184,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # ------------------------------------------------------------------ acciones del menú
 func _on_solo_pressed() -> void:
+	Diag.mark("menú: solo")
 	Network.player_name = _chosen_name()
 	Network.play_solo()
 	_prepare_world()
@@ -186,6 +195,7 @@ func _on_solo_pressed() -> void:
 
 
 func _on_host_pressed() -> void:
+	Diag.mark("menú: anfitrión")
 	Network.player_name = _chosen_name()
 	var err := Network.host()
 	if err != OK:
@@ -199,6 +209,7 @@ func _on_host_pressed() -> void:
 
 
 func _on_join_pressed() -> void:
+	Diag.mark("menú: unirse")
 	var ip := ip_edit.text.strip_edges()
 	if ip.is_empty():
 		status_label.text = "Escribe la IP del anfitrión."
@@ -459,6 +470,7 @@ func _build_ui() -> void:
 	pbox.add_child(_button("Ajustes", func(): _open_settings(pause_panel)))
 	pbox.add_child(_button("Salir al menú principal", _on_leave_pressed))
 	_build_settings()
+	_build_report()
 
 	# HUD
 	# interfaz de juego
@@ -470,6 +482,84 @@ func _build_ui() -> void:
 		if me:
 			me.respawn())
 	hud.leave_requested.connect(_on_leave_pressed)
+
+
+## Panel con el informe para copiar y mandar (qué aparato es y qué pasó la vez anterior).
+func _build_report() -> void:
+	report_panel = _centered_panel()
+	report_panel.visible = false
+	var box := report_panel.get_child(0).get_child(0) as VBoxContainer
+	var title := Label.new()
+	title.name = "Titulo"
+	title.add_theme_font_override("font", FONT_TITLE)
+	title.add_theme_font_size_override("font_size", 34)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+	var info := Label.new()
+	info.name = "Info"
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.custom_minimum_size.x = 860
+	info.add_theme_font_size_override("font_size", 17)
+	box.add_child(info)
+	_report_text = TextEdit.new()
+	_report_text.editable = false
+	_report_text.custom_minimum_size = Vector2(860, 300)
+	_report_text.add_theme_font_size_override("font_size", 13)
+	_report_text.add_theme_color_override("font_readonly_color", INK)
+	box.add_child(_report_text)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+	box.add_child(row)
+	row.add_child(_button("Copiar informe", func():
+		DisplayServer.clipboard_set(_report_text.text)
+		status_label.text = "Informe copiado: pégalo en un mensaje."
+		info.text = "Copiado. Pégalo en un mensaje (WhatsApp, correo…) y mándalo."))
+	var safe := _button("Seguir en modo seguro", func():
+		Settings.safe_mode()
+		Diag.mark("modo seguro activado")
+		_close_report())
+	safe.name = "Seguro"
+	row.add_child(safe)
+	row.add_child(_button("Seguir", _close_report))
+
+
+## Al abrir el juego tras un cierre de golpe: se para el mundo (y no se dibuja en 3D)
+## hasta que decidas, para que te dé tiempo a copiar el informe.
+func _show_crash_report() -> void:
+	Diag.mark("aviso: la vez anterior se cerró de golpe")
+	get_viewport().disable_3d = true
+	get_tree().paused = true
+	_open_report(menu_panel)
+	var title := report_panel.find_child("Titulo", true, false) as Label
+	title.text = "EL JUEGO SE CERRÓ DE GOLPE"
+	(report_panel.find_child("Info", true, false) as Label).text = \
+		"La última vez el juego se cerró solo. Pulsa «Copiar informe» y mándaselo a quien hizo el juego: " \
+		+ "dice en qué aparato y qué estaba haciendo. Después prueba «Seguir en modo seguro» " \
+		+ "(sin sombras, sin filtro de cómic y cargando el mapa poco a poco); se puede cambiar en Ajustes."
+
+
+func _open_report(from: Control) -> void:
+	_report_return = from
+	from.visible = false
+	(report_panel.find_child("Titulo", true, false) as Label).text = "INFORME DE ERRORES"
+	(report_panel.find_child("Info", true, false) as Label).text = \
+		"Si algo falla, copia esto y mándaselo a quien hizo el juego."
+	report_panel.find_child("Seguro", true, false).visible = Diag.crashed_last_time
+	_report_text.text = Diag.report()
+	report_panel.visible = true
+	focus_first(report_panel)
+
+
+func _close_report() -> void:
+	report_panel.visible = false
+	if get_viewport().disable_3d:
+		get_viewport().disable_3d = false
+		get_tree().paused = false
+		Diag.mark("vuelve a dibujar en 3D")
+	if _report_return:
+		_report_return.visible = true
+		focus_first(_report_return)
 
 
 func _centered_panel() -> CenterContainer:
@@ -509,6 +599,7 @@ func _add_ink_pass() -> void:
 	mat.render_priority = -100  # antes que los textos 3D (nombres)
 	quad.material_override = mat
 	_ink_mat = mat
+	_ink_quad = quad
 	Settings.changed.connect(_apply_ink_settings)
 	_apply_ink_settings()
 	quad.extra_cull_margin = 16384.0
@@ -841,6 +932,7 @@ func _notification(what: int) -> void:
 
 # ------------------------------------------------------------------ ajustes
 func _apply_ink_settings() -> void:
+	_ink_quad.visible = Settings.ink_effect
 	_ink_mat.set_shader_parameter("line_width", Settings.line_width)
 	_ink_mat.set_shader_parameter("grain", Settings.grain)
 
@@ -911,6 +1003,9 @@ func _build_settings() -> void:
 	_slider(grid, "Grano del papel", "grain", 0.0, 0.2, 0.01, func(v): return "%d%%" % roundi(v * 500))
 	_slider(grid, "Cámara con mando", "pad_sensitivity", 1.0, 5.0, 0.1, func(v): return "%.1f" % v)
 	_option(grid, "Controles táctiles", "touch_controls", ["Automático", "Siempre", "Nunca"])
+	_check(grid, "Filtro de cómic (tinta)", "ink_effect")
+	_check(grid, "Cargar el mapa en otro hilo", "threaded_loading")
+	box.add_child(_button("Informe de errores", func(): _open_report(settings_panel)))
 	box.add_child(_button("Volver", _close_settings))
 
 
