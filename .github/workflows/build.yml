@@ -82,7 +82,12 @@ jobs:
           ~/godot/godot --headless --export-release "Android" ../builds/PuebloMuerto-android.apk
           test -s ../builds/PuebloMuerto-android.apk
           # la misma app con gráficos OpenGL, para móviles a los que Vulkan les da problemas
+          # (se fuerza también el renderizador del móvil, por si la etiqueta "compat" no bastara)
+          cp project.godot /tmp/project.godot.bak
+          sed -i 's/^\[rendering\]$/[rendering]\n\nrenderer\/rendering_method.mobile="gl_compatibility"/' project.godot
+          grep -n "rendering_method" project.godot
           ~/godot/godot --headless --export-release "Android (compatible)" ../builds/PuebloMuerto-android-compatible.apk
+          cp /tmp/project.godot.bak project.godot
           test -s ../builds/PuebloMuerto-android-compatible.apk
           ls -la ../builds
 
