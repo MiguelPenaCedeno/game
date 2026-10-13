@@ -9,7 +9,7 @@ extends Resource
 ## nombre corto para la barra inferior
 @export var short := ""
 @export_range(0.0, 50.0, 0.01, "suffix:kg") var kg := 0.1
-@export_enum("comida", "medicina", "municion", "arma", "material", "herramienta") var category := "material"
+@export_enum("comida", "medicina", "municion", "arma", "material", "herramienta", "ropa", "nota") var category := "material"
 @export_multiline var description := ""
 ## icono para el inventario (opcional por ahora)
 @export var icon: Texture2D
@@ -26,6 +26,24 @@ extends Resource
 @export var cures_infection := false
 ## objeto que queda al usarlo (p. ej. la botella vacía al beber)
 @export var leaves := ""
+## probabilidad de que siente mal (carne cruda): quita salud y sed
+@export_range(0.0, 1.0) var sick_chance := 0.0
+
+@export_group("Ropa")
+## dónde se lleva: cabeza, torso, piernas o espalda (mochilas)
+@export var slot := ""
+## parte del daño de mordidas y arañazos que para (0-0.8); también evita heridas
+@export_range(0.0, 0.8, 0.01) var armor := 0.0
+## kilos de más que puedes cargar (mochilas)
+@export var capacity := 0.0
+## color con el que se ve puesta
+@export var color := Color(0.5, 0.5, 0.5)
+## forma: gorra, casco, casco_militar, chaleco, mochila, mochila_grande, bolsa
+@export var look := ""
+
+@export_group("Nota")
+## texto que se lee (notas y diarios de la historia)
+@export_multiline var text := ""
 
 @export_group("Herramienta")
 ## sirve para desmontar muebles y coches

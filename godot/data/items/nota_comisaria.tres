@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "nota_comisaria"
+name = "Diario del sargento Ortega"
+short = "Nota"
+kg = 0.01
+category = "nota"
+description = "Algo escrito a mano. Léelo desde la mochila."
+text = "Día 3. Ya no contestan en la central. La gente del pueblo se encierra en sus casas y lo que entra por la ventana no es gente.\n\nLos militares montaron un control en la carretera del oeste. Dicen que tienen radio y que van a evacuar. Si alguien lee esto: id al control. Yo me quedo con los chicos de la celda. No puedo dejarlos aquí."

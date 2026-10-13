@@ -29,8 +29,14 @@ var log_box: VBoxContainer
 var info_label: Label
 var hurt: ColorRect
 var minimap: Control
+## objetivo de la historia, bajo el reloj
+var objective: Label
 ## mapa de papel a pantalla completa (M)
 var paper_map: PaperMap
+## hoja de papel para leer notas y mensajes de radio
+var note_panel: CenterContainer
+var note_title: Label
+var note_text: Label
 var inventory: PanelContainer
 var inv_list: VBoxContainer
 var inv_summary: Label
@@ -90,7 +96,67 @@ func set_info(text: String) -> void:
 
 
 func is_blocking() -> bool:
-	return inventory.visible or death.visible or paper_map.visible
+	return inventory.visible or death.visible or paper_map.visible or note_panel.visible
+
+
+## Leer una nota de la mochila (las de la historia hacen avanzar el objetivo).
+func show_note(k: String) -> void:
+	var it: ItemData = Items.ITEMS[k]
+	show_paper(it.name, it.text)
+	world.story.read.rpc_id(1, k)
+
+
+## Hoja de papel con un texto (notas, mensajes de radio).
+func show_paper(title: String, text: String) -> void:
+	if inventory.visible:
+		close_panel()
+	note_title.text = title.to_upper()
+	note_text.text = text
+	note_panel.visible = true
+	Sfx.play("search", -6.0, 1.8)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_note() -> void:
+	note_panel.visible = false
+	if player and not player.dead and not is_blocking():
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _build_note() -> void:
+	note_panel = CenterContainer.new()
+	note_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	note_panel.visible = false
+	add_child(note_panel)
+	var panel := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.96, 0.93, 0.83)
+	sb.border_color = INK
+	sb.set_border_width_all(3)
+	sb.shadow_color = INK
+	sb.shadow_size = 1
+	sb.shadow_offset = Vector2(8, 8)
+	sb.set_content_margin_all(28)
+	panel.add_theme_stylebox_override("panel", sb)
+	note_panel.add_child(panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 14)
+	panel.add_child(box)
+	note_title = Label.new()
+	note_title.add_theme_font_override("font", FONT_TITLE)
+	note_title.add_theme_font_size_override("font_size", 28)
+	box.add_child(note_title)
+	note_text = Label.new()
+	note_text.add_theme_font_override("font", FONT_TITLE)
+	note_text.add_theme_font_size_override("font_size", 19)
+	note_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note_text.custom_minimum_size = Vector2(580, 0)
+	box.add_child(note_text)
+	var close := Button.new()
+	close.text = "Cerrar"
+	close.size_flags_horizontal = Control.SIZE_SHRINK_END
+	close.pressed.connect(close_note)
+	box.add_child(close)
 
 
 func toggle_map() -> void:
@@ -176,11 +242,11 @@ func _process(_delta: float) -> void:
 	bars.stamina.value = player.stamina
 	bars.hunger.value = player.hunger
 	bars.thirst.value = player.thirst
-	bars.weight.max_value = Items.CARRY_MAX
+	bars.weight.max_value = player.carry_max()
 	bars.weight.value = player.weight
-	weight_label.text = "%.1f / %d kg" % [player.weight, int(Items.CARRY_MAX)]
-	var heavy: bool = player.weight > Items.CARRY_HEAVY
-	var loaded: bool = player.weight > Items.CARRY_LIGHT
+	weight_label.text = "%.1f / %d kg" % [player.weight, int(player.carry_max())]
+	var heavy: bool = player.weight > player.carry_heavy()
+	var loaded: bool = player.weight > player.carry_light()
 	(bars.weight.get_theme_stylebox("fill") as StyleBoxFlat).bg_color = ACCENT if heavy else INK
 
 	var m := PackedStringArray()
@@ -207,6 +273,7 @@ func _process(_delta: float) -> void:
 	var main_node := get_tree().get_first_node_in_group("main")
 	var to_horde: int = main_node.days_to_horde() if main_node else 99
 	clock.text = world.clock_text()
+	objective.text = "Objetivo: " + world.story.objective_text()
 	if to_horde == 0:
 		clock.text += " · ¡HORDA!" if world.night or world.hour() >= 17.0 else " · horda esta noche"
 	else:
@@ -271,12 +338,18 @@ func _process(_delta: float) -> void:
 			action = "[E] Cerrar" if st.open else "[E] Abrir"
 		elif st.type == "cama":
 			action = "[E] Dormir aquí (reapareces aquí)"
+		elif st.type == "huerto":
+			action = {"plant": "[E] Plantar (1 semilla)", "water": "[E] Regar (1 agua)", "harvest": "[E] Cosechar"}.get(
+				player.garden_action(player.struct_target), "Creciendo %d%% · regado" % roundi(st.crop.grow / world.structures.RIPE * 100.0))
 		elif st.hp < info.hp:
 			action = "[E] Reparar (1 %s)" % Items.ITEMS[info.mat].short.to_lower()
 		prompt.text = "%s %d/%d  %s  · [R] Quitar" % [info.name, st.hp, info.hp, action]
 		prompt_panel.visible = true
 	elif player.revive_target and not player.dead:
 		prompt.text = "[E] Levantar a %s" % player.revive_target.display_name
+		prompt_panel.visible = true
+	elif player.near_special() != "" and player.interact_idx < 0 and not player.dead:
+		prompt.text = "[E] Usar la radio" if player.near_special() == "radio" else "[E] Subir al helicóptero"
 		prompt_panel.visible = true
 	elif player.vehicle_target and not player.dead:
 		var v: Node3D = player.vehicle_target
@@ -313,6 +386,32 @@ func _refresh_inventory() -> void:
 	var open := cont_idx >= 0
 	cont_box.visible = open
 
+	# ropa puesta
+	var slot_names := {"cabeza": "Cabeza", "torso": "Torso", "piernas": "Piernas", "espalda": "Espalda"}
+	inv_list.add_child(_section("PUESTO · protege %d%%" % roundi(player.armor() * 100)))
+	for slot in player.SLOTS:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var l := Label.new()
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if player.equipped.has(slot):
+			var it: ItemData = Items.ITEMS[player.equipped[slot]]
+			var extra := (" (+%d kg)" % int(it.capacity)) if it.capacity > 0 else (" (%d%%)" % roundi(it.armor * 100) if it.armor > 0 else "")
+			l.text = "%s: %s%s" % [slot_names[slot], it.name, extra]
+			row.add_child(l)
+			var b := Button.new()
+			b.text = "Quitar"
+			b.add_theme_font_size_override("font_size", 17)
+			var sl: String = slot
+			b.pressed.connect(func(): player.unequip(sl); _refresh_inventory())
+			row.add_child(b)
+		else:
+			l.text = "%s: —" % slot_names[slot]
+			l.add_theme_color_override("font_color", Color(INK, 0.5))
+			row.add_child(l)
+		inv_list.add_child(row)
+	inv_list.add_child(_section("EN LA MOCHILA"))
+
 	# mochila
 	var rows := []
 	for k in player.owned:
@@ -332,7 +431,16 @@ func _refresh_inventory() -> void:
 				["Dejar 1", func(): player.put(idx, k, 1)],
 				["Todo", func(): player.put(idx, k, n)]]))
 		else:
-			inv_list.add_child(_item_row(k, n, [["Soltar 1", func(): player.drop_item(k); _refresh_inventory()]]))
+			var btns := []
+			var it: ItemData = Items.ITEMS[k]
+			if it.slot != "":
+				btns.append(["Ponerse", func(): player.equip(k); _refresh_inventory()])
+			elif it.category == "nota":
+				btns.append(["Leer", func(): show_note(k)])
+			elif it.hunger > 0 or it.thirst > 0 or it.heal > 0 or it.cures_infection:
+				btns.append(["Usar", func(): player.consume(k); _refresh_inventory()])
+			btns.append(["Soltar 1", func(): player.drop_item(k); _refresh_inventory()])
+			inv_list.add_child(_item_row(k, n, btns))
 
 	# mueble
 	if open:
@@ -391,10 +499,10 @@ func _refresh_inventory() -> void:
 			row.add_child(b)
 			craft_list.add_child(row)
 
-	var f := Items.speed_factor(player.weight)
-	inv_summary.text = "Carga: %.1f kg de %d · Velocidad: %d%%%s" % [
-		player.weight, int(Items.CARRY_MAX), roundi(f * 100),
-		"\nCon más de %d kg no puedes correr." % int(Items.CARRY_HEAVY) if player.weight > Items.CARRY_LIGHT else ""]
+	var f := Items.speed_factor(player.weight, player.carry_bonus())
+	inv_summary.text = "Habilidades: %s\n" % player.skills_text() + "Carga: %.1f kg de %d · Velocidad: %d%%%s" % [
+		player.weight, int(player.carry_max()), roundi(f * 100),
+		"\nCon más de %d kg no puedes correr." % int(player.carry_heavy()) if player.weight > player.carry_light() else ""]
 
 
 func _take_all() -> void:
@@ -406,9 +514,9 @@ func _take_all() -> void:
 		var n: int = cont_loot[k]
 		var fit := 0
 		if Items.WEAPONS.has(k):
-			fit = 1 if player.owned.has(k) or w + Items.kg(k) <= Items.CARRY_MAX + 0.001 else 0
+			fit = 1 if player.owned.has(k) or w + Items.kg(k) <= player.carry_max() + 0.001 else 0
 		else:
-			fit = clampi(int(floor((Items.CARRY_MAX - w) / Items.kg(k) + 0.001)), 0, n)
+			fit = clampi(int(floor((player.carry_max() - w) / Items.kg(k) + 0.001)), 0, n)
 		if fit > 0:
 			w += Items.kg(k) * fit
 			world.request_take.rpc_id(1, cont_idx, k, fit)
@@ -437,6 +545,15 @@ func _item_row(k: String, n: int, buttons: Array) -> HBoxContainer:
 		btn.pressed.connect(b[1])
 		row.add_child(btn)
 	return row
+
+
+func _section(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_override("font", FONT_TITLE)
+	l.add_theme_font_size_override("font_size", 17)
+	l.add_theme_color_override("font_color", Color(INK, 0.7))
+	return l
 
 
 func _note(text: String) -> Label:
@@ -480,6 +597,12 @@ func _build() -> void:
 	clock.add_theme_font_override("font", FONT_TITLE)
 	clock.add_theme_font_size_override("font_size", 18)
 	sbox.add_child(clock)
+	objective = Label.new()
+	objective.add_theme_font_size_override("font_size", 15)
+	objective.add_theme_color_override("font_color", ACCENT.darkened(0.2))
+	objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	objective.custom_minimum_size.x = 250
+	sbox.add_child(objective)
 	bars.hp = _bar(sbox, "Salud", ACCENT)
 	bars.stamina = _bar(sbox, "Energía", INK)
 	bars.hunger = _bar(sbox, "Hambre", INK)
@@ -590,6 +713,7 @@ func _build() -> void:
 	_build_death()
 	paper_map = PaperMap.new()
 	add_child(paper_map)
+	_build_note()
 
 
 func _build_inventory() -> void:

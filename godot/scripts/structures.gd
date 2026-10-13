@@ -20,7 +20,12 @@ const TYPES := {
 	"empalizada": {"name": "Empalizada", "size": Vector3(2.0, 1.5, 0.35), "hp": 220, "mat": "tablones", "snap": 1.0, "rot_step": PI / 2},
 	"pinchos": {"name": "Trampa de pinchos", "size": Vector3(1.2, 0.25, 1.2), "hp": 40, "mat": "clavos", "snap": 0.5, "trap": true},
 	"cama": {"name": "Cama", "size": Vector3(1.0, 0.5, 2.0), "hp": 150, "mat": "tablones"},
+	"huerto": {"name": "Huerto", "size": Vector3(2.0, 0.2, 2.0), "hp": 120, "mat": "tablones"},
 }
+## minutos de juego regado que tarda en madurar (un día y medio, más o menos)
+const RIPE := 2000.0
+## el riego dura un día de juego
+const WATER_LASTS := 1440.0
 ## distancia a la que una estación (banco, hoguera) sirve para fabricar
 const STATION_RANGE := 3.0
 
@@ -29,6 +34,8 @@ var by_id := {}
 var _next_id := 1
 var _fires: Array[Dictionary] = []
 var _trap_tick := 0.0
+var _garden_tick := 0.0
+var _garden_minutes := -1.0
 @onready var world: Node = get_parent()
 
 
@@ -48,6 +55,10 @@ func _process(delta: float) -> void:
 		if _trap_tick >= 0.5:
 			_trap_tick = 0.0
 			_process_traps()
+		_garden_tick += delta
+		if _garden_tick >= 1.0:
+			_garden_tick = 0.0
+			_process_gardens()
 
 
 ## ¿Hay una estación de este tipo cerca?
@@ -115,6 +126,9 @@ func _add(sid: int, type: String, pos: Vector3, rot: float, cont_idx: int, owner
 	add_child(node)
 	by_id[sid] = {"type": type, "pos": pos, "rot": rot, "node": node, "hp": TYPES[type].hp,
 		"open": false, "owner": owner_name}
+	if type == "huerto":
+		by_id[sid].crop = {"planted": false, "grow": 0.0, "watered": -1e9}
+		_paint_crop(sid)
 	_next_id = maxi(_next_id, sid + 1)
 	if type == "caja":
 		world.add_box_container(node, cont_idx, sid)
@@ -256,7 +270,7 @@ func send_state_to(peer: int) -> void:
 	for sid in by_id:
 		var s: Dictionary = by_id[sid]
 		if s.type != "caja":
-			list.append([sid, s.type, s.pos, s.rot, s.hp, s.open, s.owner])
+			list.append([sid, s.type, s.pos, s.rot, s.hp, s.open, s.owner, s.get("crop", {})])
 	_sync.rpc_id(peer, list)
 
 
@@ -265,6 +279,8 @@ func _sync(list: Array) -> void:
 	for e in list:
 		_add(e[0], e[1], e[2], e[3], -1, e[6])
 		_restore(e[0], e[4], e[5])
+		if not e[7].is_empty():
+			_set_crop(e[0], e[7].planted, e[7].grow, e[7].watered)
 
 
 func _restore(sid: int, hp: int, open: bool) -> void:
@@ -282,7 +298,7 @@ func export_state() -> Array:
 		var s: Dictionary = by_id[sid]
 		if s.type != "caja":
 			out.append({"sid": sid, "type": s.type, "pos": s.pos, "rot": s.rot, "hp": s.hp,
-				"open": s.open, "owner": s.owner})
+				"open": s.open, "owner": s.owner, "crop": s.get("crop", {}).duplicate()})
 	return out
 
 
@@ -290,6 +306,9 @@ func import_state(list: Array) -> void:
 	for e in list:
 		_add(e.sid, e.type, e.pos, e.rot, -1, e.get("owner", ""))
 		_restore(e.sid, e.get("hp", TYPES[e.type].hp), e.get("open", false))
+		var crop: Dictionary = e.get("crop", {})
+		if not crop.is_empty():
+			_set_crop(e.sid, crop.planted, crop.grow, crop.watered)
 
 
 func clear() -> void:
@@ -297,6 +316,105 @@ func clear() -> void:
 		by_id[sid].node.queue_free()
 	by_id.clear()
 	_next_id = 1
+
+
+# ------------------------------------------------------------------ huerto
+## 0 = vacío, 1-3 = creciendo, 4 = para cosechar
+func crop_stage(sid: int) -> int:
+	var c: Dictionary = by_id[sid].get("crop", {})
+	if c.is_empty() or not c.planted:
+		return 0
+	if c.grow >= RIPE:
+		return 4
+	return 1 + int(c.grow / RIPE * 3.0)
+
+
+func crop_watered(sid: int) -> bool:
+	var c: Dictionary = by_id[sid].get("crop", {})
+	return not c.is_empty() and world.game_minutes - float(c.watered) < WATER_LASTS
+
+
+## Plantar, regar o cosechar (el jugador ya gastó las semillas o el agua).
+@rpc("any_peer", "call_local", "reliable")
+func request_garden(sid: int, action: String) -> void:
+	if not multiplayer.is_server() or not by_id.has(sid) or by_id[sid].type != "huerto":
+		return
+	var c: Dictionary = by_id[sid].crop
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0:
+		sender = 1
+	match action:
+		"plant":
+			if not c.planted:
+				_set_crop.rpc(sid, true, 0.0, c.watered)
+		"water":
+			_set_crop.rpc(sid, c.planted, c.grow, world.game_minutes)
+		"harvest":
+			if c.planted and c.grow >= RIPE:
+				_set_crop.rpc(sid, false, 0.0, c.watered)
+				_garden_yield.rpc_id(sender, randi_range(3, 5), 1 if randf() < 0.7 else 2)
+
+
+@rpc("authority", "call_local", "reliable")
+func _set_crop(sid: int, planted: bool, grow: float, watered: float) -> void:
+	if not by_id.has(sid):
+		return
+	by_id[sid].crop = {"planted": planted, "grow": grow, "watered": watered}
+	_paint_crop(sid)
+
+
+## Lo cosechado va a la mochila de quien cosecha.
+@rpc("authority", "call_local", "reliable")
+func _garden_yield(veg: int, seeds: int) -> void:
+	var main := get_tree().get_first_node_in_group("main")
+	var me: Node = main.players.get_node_or_null(str(multiplayer.get_unique_id())) if main else null
+	if me:
+		me.receive_harvest(veg, seeds)
+
+
+## Lo regado crece; lo que lleva más de un día sin agua se para.
+func _process_gardens() -> void:
+	var now: float = world.game_minutes
+	if _garden_minutes < 0.0:
+		_garden_minutes = now
+	var dt := now - _garden_minutes
+	_garden_minutes = now
+	if dt <= 0.0:
+		return
+	for sid in by_id:
+		var s: Dictionary = by_id[sid]
+		if s.type != "huerto" or not s.crop.planted or s.crop.grow >= RIPE:
+			continue
+		var before := crop_stage(sid)
+		var was_wet := now - dt - float(s.crop.watered) < WATER_LASTS
+		# solo crece el rato que ha estado regado
+		var gain := clampf(minf(now, float(s.crop.watered) + WATER_LASTS) - (now - dt), 0.0, dt)
+		s.crop.grow = minf(RIPE, s.crop.grow + gain)
+		if crop_stage(sid) != before or was_wet != crop_watered(sid):
+			_set_crop.rpc(sid, true, s.crop.grow, s.crop.watered)
+
+
+func _paint_crop(sid: int) -> void:
+	var node: Node3D = by_id[sid].node
+	var old := node.get_node_or_null("Plantas")
+	if old:
+		old.free()
+	var plants := Node3D.new()
+	plants.name = "Plantas"
+	node.add_child(plants)
+	# tierra oscura si está regada
+	world._box(Vector3(0, 0.205, 0), Vector3(1.8, 0.01, 1.8), Color(0.24, 0.18, 0.13) if crop_watered(sid) else Color(0.42, 0.34, 0.25), false, plants, 0.6, 1.2)
+	var stage := crop_stage(sid)
+	if stage == 0:
+		return
+	var green := Color(0.34, 0.46, 0.22)
+	for x in [-0.55, 0.0, 0.55]:
+		for z in [-0.55, 0.0, 0.55]:
+			var h := 0.12 + stage * 0.11
+			var leaf: MeshInstance3D = world._cyl_mesh(Vector3(x, 0.2 + h / 2, z), 0.0, 0.05 + stage * 0.035, h, green.darkened(0.1 if crop_watered(sid) else 0.0).lerp(Color(0.5, 0.45, 0.25), 0.0 if crop_watered(sid) else 0.4), plants)
+			leaf.rotation.y = x * 3.0 + z
+			if stage == 4:
+				world._sphere_mesh(Vector3(x + 0.06, 0.2 + h * 0.6, z), 0.05, Color(0.85, 0.42, 0.12), plants)
 
 
 # ------------------------------------------------------------------ aspecto
@@ -314,6 +432,12 @@ func _build(type: String) -> StaticBody3D:
 	var dark := Color(0.28, 0.2, 0.14)
 	var metal := Color(0.45, 0.47, 0.5)
 	match type:
+		"huerto":
+			# marco de tablones con tierra dentro (las plantas se pintan aparte)
+			world._box(Vector3(0, 0.1, 0), Vector3(1.8, 0.2, 1.8), Color(0.42, 0.34, 0.25), false, body, 0.6, 1.2)
+			for s in [-1.0, 1.0]:
+				world._box(Vector3(s * 0.95, 0.12, 0), Vector3(0.1, 0.24, 2.0), wood, false, body)
+				world._box(Vector3(0, 0.12, s * 0.95), Vector3(2.0, 0.24, 0.1), wood, false, body)
 		"banco":
 			world._box(Vector3(0, 0.88, 0), Vector3(1.6, 0.08, 0.8), wood, false, body, 0.3, 3.0)
 			for x in [-0.7, 0.7]:

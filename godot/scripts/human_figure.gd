@@ -17,6 +17,8 @@ signal footstep(soft: bool)
 @export var hair := Color(0.2, 0.14, 0.1)
 @export var shoes := Color(0.12, 0.1, 0.09)
 @export var zombie := false
+## ropa visible: ranura -> [forma, color] (gorra, casco, chaleco, mochila…)
+var gear := {}
 
 const HIP_HEIGHT := 0.94
 
@@ -52,6 +54,22 @@ func _ready() -> void:
 	_build()
 	_merge_parts()
 
+
+## Vuelve a montar la figura (al cambiar de ropa).
+func rebuild() -> void:
+	if hips == null:
+		return
+	var w := _weapon
+	for c in get_children():
+		c.free()
+	_merged.clear()
+	_weapon = ""
+	_build()
+	_merge_parts()
+	set_weapon(w)
+	if not _shadows:
+		_shadows = true
+		set_shadows(false)
 
 ## Une las piezas de cada articulación en una sola malla (de ~32 a ~12 por figura).
 ## Los ojos brillantes y el arma de la mano se quedan aparte.
@@ -193,6 +211,8 @@ func _build() -> void:
 		_part(head, _sphere(0.125), hair, Vector3(0, 0.145, 0.015), Vector3(0.95, 0.75, 1.02))
 		_part(head, _sphere(0.11), hair, Vector3(0, 0.1, 0.045), Vector3(0.98, 0.9, 0.85))
 
+	_build_gear(head)
+
 	# brazos
 	shoulder_l = _joint(spine, Vector3(0.235, 0.49, 0))
 	shoulder_r = _joint(spine, Vector3(-0.235, 0.49, 0))
@@ -225,6 +245,36 @@ func _build() -> void:
 
 	for mi in find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+
+## Gorras, cascos, chalecos y mochilas.
+func _build_gear(head: Node3D) -> void:
+	for slot in gear:
+		var look: String = gear[slot][0]
+		var col: Color = gear[slot][1]
+		match look:
+			"gorra":
+				_part(head, _sphere(0.128), col, Vector3(0, 0.16, 0.01), Vector3(0.98, 0.55, 1.02))
+				_part(head, _box(Vector3(0.17, 0.015, 0.11)), col.darkened(0.2), Vector3(0, 0.135, -0.13))
+			"casco":
+				_part(head, _sphere(0.155), col, Vector3(0, 0.12, 0.0), Vector3(1.0, 1.05, 1.1))
+				_part(head, _box(Vector3(0.17, 0.07, 0.02)), Color(0.1, 0.11, 0.13), Vector3(0, 0.1, -0.165))
+			"casco_militar":
+				_part(head, _sphere(0.145), col, Vector3(0, 0.15, 0.0), Vector3(1.05, 0.72, 1.1))
+				_part(head, _cyl(0.165, 0.165, 0.02), col.darkened(0.15), Vector3(0, 0.11, 0.0), Vector3(1, 1, 1.08))
+			"chaleco":
+				_part(spine, _cyl(0.222, 0.19, 0.42), col, Vector3(0, 0.31, 0.0), Vector3(1, 1, 0.74))
+				_part(spine, _box(Vector3(0.16, 0.08, 0.02)), Color(0.85, 0.83, 0.76), Vector3(0, 0.38, -0.16))
+			"mochila":
+				_part(spine, _box(Vector3(0.3, 0.36, 0.14)), col, Vector3(0, 0.32, 0.18))
+				_part(spine, _box(Vector3(0.28, 0.1, 0.06)), col.darkened(0.2), Vector3(0, 0.24, 0.27))
+			"mochila_grande":
+				_part(spine, _box(Vector3(0.34, 0.52, 0.2)), col, Vector3(0, 0.3, 0.2))
+				_part(spine, _cyl(0.07, 0.07, 0.42), col.darkened(0.3), Vector3(0, 0.6, 0.2), Vector3.ONE, Vector3(0, 0, PI / 2))
+				_part(spine, _box(Vector3(0.24, 0.14, 0.07)), col.darkened(0.15), Vector3(0, 0.18, 0.32))
+			"bolsa":
+				_part(spine, _box(Vector3(0.44, 0.2, 0.2)), col, Vector3(0, 0.12, 0.2))
+				_part(spine, _box(Vector3(0.04, 0.6, 0.03)), col.darkened(0.3), Vector3(0, 0.33, 0.12), Vector3.ONE, Vector3(0, 0, 0.75))
 
 
 ## Cambia el objeto que lleva en la mano derecha.

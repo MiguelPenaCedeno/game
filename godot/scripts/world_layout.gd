@@ -106,6 +106,10 @@ var trees := {}
 var prefabs: Array[Dictionary] = []
 ## dónde aparecen los vehículos que se pueden conducir: {pos, yaw, kind}
 var vehicles: Array[Dictionary] = []
+## puntos especiales de los lugares hechos a mano (p. ej. "Radio") -> posición
+var specials := {}
+## muebles con una nota o un objeto de la historia: índice -> [objetos]
+var story_loot := {}
 ## nombres para el mapa: {name, pos, kind}
 var places: Array[Dictionary] = []
 ## zonas ocupadas (sin árboles ni basura)
@@ -148,6 +152,18 @@ func _init() -> void:
 	_power_lines()
 	_index()
 	_forest()
+	_story()
+
+
+## Los muebles que guardan las notas y la batería de la historia.
+func _story() -> void:
+	var want := [["armero", "Comisaría", ["nota_comisaria"]], ["taquilla", "Control militar", ["nota_control"]],
+		["botiquin", "Hospital", ["bateria", "nota_hospital"]]]
+	for w in want:
+		for i in containers.size():
+			if containers[i].type == w[0] and place_at(containers[i].pos, 30.0) == w[1]:
+				story_loot[i] = w[2]
+				break
 
 
 # ------------------------------------------------------------------ consultas
@@ -535,6 +551,8 @@ func _prefab(path: String, pos: Vector3, yaw: float) -> void:
 			if FURNITURE.has(type):
 				var lx := xf * local
 				entry.conts.append(_container(type, Transform3D(lx.basis, lx.origin), Vector3.ZERO, 0.0, 0.0))
+		elif n is Marker3D and n.name == "Radio":
+			specials["radio"] = (xf * local).origin
 		elif n is Marker3D and n.name.begins_with("Vehiculo"):
 			var vx := xf * local
 			_vehicle(vx.origin, _yaw_of(vx), "coche")

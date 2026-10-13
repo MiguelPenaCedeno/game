@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "chaqueta_cuero"
+name = "Chaqueta de cuero"
+short = "Cuero"
+kg = 1.4
+category = "ropa"
+description = "Los dientes resbalan en el cuero."
+slot = "torso"
+armor = 0.25
+capacity = 0.0
+color = Color(0.28, 0.2, 0.15, 1)
+look = ""

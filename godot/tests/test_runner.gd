@@ -154,6 +154,7 @@ func _test_solo() -> void:
 	var hp: float = p.hp
 	await _wait(3.0)
 	check(p.hp < hp, "un zombi cerca te hace daño")
+	z.hp = 5.0
 	for i in 5:
 		z.damage(3.0, Vector3.ZERO)
 	check(z.dead, "el zombi muere a golpes")
@@ -182,6 +183,10 @@ func _test_solo() -> void:
 	await _test_big_map(p, w)
 	await _test_vehicles(p, w)
 	await _test_paper_map(p, w)
+	await _test_gear_and_skills(p, w)
+	await _test_zombie_types(p, w)
+	await _test_hunting_and_garden(p, w)
+	await _test_story(p, w)
 
 	# pausa
 	main._set_paused(true)
@@ -226,6 +231,19 @@ func _test_host() -> void:
 		check(await _wait_until(func(): return dv.global_position.distance_to(p0) > 2.0, 10.0), "y lo veo moverse (%.1f m)" % dv.global_position.distance_to(p0))
 		check(await _wait_until(func(): return dv.driver == 0, 15.0), "y bajarse")
 	check(await _wait_until(func(): return main.world.markers.size() > 0, 15.0), "veo la marca que puso en el mapa")
+	# Fase 5: un bruto que ella ve, su mochila y la historia compartida
+	var zb: Node = null
+	for z in main.zombies.get_children():
+		if not z.dead:
+			zb = z
+	if zb:
+		zb.variant = "bruto"
+	check(await _wait_until(func():
+		for pl in main.players.get_children():
+			if pl.name != "1" and pl.outfit.contains("mochila_escolar") and pl.figure.gear.has("espalda"):
+				return true
+		return false, 15.0), "veo la mochila que se puso")
+	main.world.story.read("nota_comisaria")
 	# ella cae al suelo: voy y la levanto (sin zombis alrededor que la vuelvan a tumbar)
 	main._zombie_timer.stop()
 	for z in main.zombies.get_children():
@@ -304,6 +322,14 @@ func _test_client() -> void:
 	check(await _wait_until(func(): return v.driver == 0 and not v.is_multiplayer_authority(), 4.0), "me bajo y el coche vuelve al anfitrión")
 	main.world.request_marker.rpc_id(1, Vector2(30, 30), 2, "Invitada", Color.RED)
 	check(await _wait_until(func(): return main.world.markers.size() > 0, 5.0), "marco un sitio en el mapa")
+	p.inv["mochila_escolar"] = 1
+	p.equip("mochila_escolar")
+	check(await _wait_until(func():
+		for z in main.zombies.get_children():
+			if z.variant == "bruto" and z.figure.scale.x > 1.2:
+				return true
+		return false, 15.0), "veo un zombi bruto")
+	check(await _wait_until(func(): return main.world.story.stage >= 1, 15.0), "y la historia avanza para los dos")
 	# me tumban: caigo al suelo (no muero) porque el anfitrión sigue en pie
 	for z in main.zombies.get_children():
 		z.set_process(false)
@@ -620,19 +646,220 @@ func _test_paper_map(p: Node, w: Node) -> void:
 	main.hud.toggle_map()
 	check(main.hud.paper_map.visible and main.hud.paper_map._base != null, "M abre el mapa de papel")
 	await _wait(0.2)
+	var before: Array = w.markers.keys()
 	main.hud.paper_map._place(Vector2(p.global_position.x + 10, p.global_position.z))
-	check(await _wait_until(func(): return w.markers.size() == 1, 3.0), "pongo una marca")
-	var id: int = w.markers.keys()[0]
+	check(await _wait_until(func(): return w.markers.size() == before.size() + 1, 3.0), "pongo una marca")
+	var id := -1
+	for k in w.markers:
+		if k not in before:
+			id = k
 	check(w._marker_nodes.has(id), "y se ve en el mundo")
 	main.save_now()
 	var saved := SaveGame.load_world()
-	check(saved.get("markers", []).size() == 1, "las marcas se guardan")
+	check(saved.get("markers", []).size() == before.size() + 1, "las marcas se guardan")
 	var ch := SaveGame.load_character(Network.world_id, Network.player_name)
 	check((ch.get("explored", PackedByteArray()) as PackedByteArray).size() == PaperMap.CELLS * PaperMap.CELLS, "y lo explorado también")
 	main.hud.paper_map._remove_near(main.hud.paper_map.world_to_screen(w.markers[id].pos))
-	check(await _wait_until(func(): return w.markers.is_empty(), 3.0), "clic derecho la quita")
+	check(await _wait_until(func(): return not w.markers.has(id), 3.0), "clic derecho la quita")
 	main.hud.close_map()
 	check(not main.hud.paper_map.visible, "y se cierra")
+
+
+# ------------------------------------------------------------------ Fase 5
+func _test_gear_and_skills(p: Node, w: Node) -> void:
+	print("-- ropa y habilidades --")
+	p.global_position = Vector3(0, 0.2, 4)
+	var base: float = p.carry_max()
+	p.inv["mochila_montana"] = 1
+	p.inv["chaleco_policia"] = 1
+	p.inv["casco_moto"] = 1
+	for k in ["mochila_montana", "chaleco_policia", "casco_moto"]:
+		p.equip(k)
+	check(is_equal_approx(p.carry_max(), base + 10.0), "la mochila de montaña da 10 kg más (%d kg)" % int(p.carry_max()))
+	check(p.armor() > 0.6, "el chaleco y el casco protegen (%d%%)" % roundi(p.armor() * 100))
+	check(p.outfit.contains("espalda:mochila_montana") and p.figure.gear.has("espalda"), "y se ven puestos (%s)" % p.outfit)
+	p.hp = 100.0
+	p.take_hit(20.0, p.global_position + Vector3(1, 0, 0))
+	check(p.hp > 88.0, "un mordisco hace mucho menos daño (%d de salud)" % p.hp)
+	p.unequip("espalda")
+	check(is_equal_approx(p.carry_max(), base) and p.inv.mochila_montana == 1, "quitarse la mochila la devuelve a la mochila")
+	p.equip("mochila_montana")
+	# habilidades
+	var lvl: int = p.skill_level("combate")
+	p.add_xp("combate", 25.0)
+	check(p.skill_level("combate") > lvl, "el combate sube de nivel con la experiencia")
+	check(p.skills_text().contains("Combate %d" % p.skill_level("combate")), "se ve en la mochila (%s)" % p.skills_text())
+	p.save_state()
+	var ch := SaveGame.load_character(Network.world_id, Network.player_name)
+	check(ch.get("equipped", {}).has("torso") and float(ch.get("skills", {}).get("combate", 0.0)) >= 25.0, "la ropa y las habilidades se guardan")
+
+
+func _test_zombie_types(p: Node, w: Node) -> void:
+	print("-- tipos de zombi --")
+	for z in main.zombies.get_children():
+		z.queue_free()
+	await _wait(0.1)
+	var made := {}
+	for v in ["bruto", "corredor", "policia", "griton"]:
+		var z: Node = main.ZOMBIE_SCENE.instantiate()
+		z.name = "Prueba_" + v
+		z.variant = v
+		z.position = p.global_position + Vector3(30 + made.size() * 3, 0.1, 0)
+		z.net_pos = z.position
+		main.zombies.add_child(z, true)
+		made[v] = z
+	await _wait(0.2)
+	check(made.bruto.hp >= 15.0 and made.bruto.figure.scale.x > 1.2, "el bruto es grande y aguanta mucho (%d)" % made.bruto.hp)
+	check(made.corredor.speed > 2.0, "el corredor es rápido (%.1f)" % made.corredor.speed)
+	check(made.policia.figure.gear.has("torso"), "el policía lleva chaleco")
+	var hp0: float = made.policia.hp
+	made.policia.damage(1.0, Vector3.ZERO, "bate")
+	check(made.policia.hp > hp0 - 1.0, "y encaja menos los golpes")
+	var cop := 0
+	for i in 200:
+		if main.pick_variant(w.story.place_pos("Comisaría")) == "policia":
+			cop += 1
+	check(cop > 60, "en la comisaría casi todos son policías (%d/200)" % cop)
+	# el gritón avisa a los demás
+	var g: Node = made.griton
+	var other: Node = made.corredor
+	for z in made.values():
+		z.set_physics_process(false)
+	g.global_position = p.global_position + Vector3(0, 0, -8)
+	g.look_at(p.global_position, Vector3.UP)
+	g.state = "wander"
+	other.global_position = p.global_position + Vector3(30, 0, 0)
+	other.state = "wander"
+	p.crouching = false
+	g._sense()
+	check(other.state == "chase" and other.target_player == p, "el gritón grita y los de alrededor vienen")
+	for z in main.zombies.get_children():
+		z.queue_free()
+
+
+func _test_hunting_and_garden(p: Node, w: Node) -> void:
+	print("-- caza y huerto --")
+	var farm: Vector3 = w.story.place_pos("Granja Vieja")
+	var spot := farm + Vector3(30, 0, 30)
+	p.global_position = spot + Vector3.UP * 0.2
+	w.ensure_loaded([spot])
+	var deer: Node = null
+	for i in 5:
+		deer = main.spawn_animal(spot, "ciervo", Vector2(8.0, 14.0))
+		if deer:
+			break
+	check(deer != null, "aparece un ciervo en el campo")
+	if deer:
+		await _wait(0.6)
+		check(deer.state == "flee", "huye al verte")
+		var bags: int = w.containers.size()
+		deer.damage(99.0, Vector3.ZERO, "pistola")
+		await _wait(0.3)
+		var meat: Dictionary = w.containers[w.containers.size() - 1]
+		check(deer.dead and w.containers.size() == bags + 1 and int(meat.loot.get("carne_cruda", 0)) >= 3, "abatido deja carne (%s)" % str(meat.loot))
+	# asar en la hoguera
+	w.structures.request_place("hoguera", p.global_position + Vector3(2, -0.2, 0), 0.0)
+	await _wait(0.2)
+	p.inv["carne_cruda"] = 1
+	p.start_craft("carne_asada")
+	await _wait_search(p)
+	check(int(p.inv.get("carne_asada", 0)) == 1, "la carne se asa en la hoguera")
+	# huerto
+	w.structures.request_place("huerto", p.global_position + Vector3(0, -0.2, 3), 0.0)
+	await _wait(0.2)
+	var sid := -1
+	for k in w.structures.by_id:
+		if w.structures.by_id[k].type == "huerto":
+			sid = k
+	check(sid >= 0, "coloco un huerto")
+	p.inv["semillas"] = 1
+	p.inv["agua"] = 2
+	p._use_garden(sid)
+	await _wait(0.2)
+	check(w.structures.crop_stage(sid) == 1 and p.inv.semillas == 0, "planto las semillas")
+	p._use_garden(sid)
+	await _wait(0.2)
+	check(w.structures.crop_watered(sid), "lo riego")
+	w.set_time(w.game_minutes + 1300.0)
+	await _wait(1.5)
+	p._use_garden(sid)
+	await _wait(0.2)
+	w.set_time(w.game_minutes + 800.0)
+	await _wait(1.5)
+	check(w.structures.crop_stage(sid) == 4, "regado cada día, madura")
+	var veg: int = int(p.inv.get("verduras", 0))
+	p._use_garden(sid)
+	check(await _wait_until(func(): return int(p.inv.get("verduras", 0)) > veg, 3.0), "cosecho verduras (%d)" % int(p.inv.get("verduras", 0)))
+	main.save_now()
+	var saved := SaveGame.load_world()
+	var crop_saved := false
+	for e in saved.structures:
+		if e.type == "huerto" and e.has("crop"):
+			crop_saved = true
+	check(crop_saved, "el huerto se guarda")
+
+
+func _test_story(p: Node, w: Node) -> void:
+	print("-- historia --")
+	var story: Node = w.story
+	story.reset()
+	story.start_new()
+	await _wait(0.1)
+	check(story.stage == 0 and main.hud.objective.text.begins_with("Objetivo:"), "hay un objetivo: %s" % story.objective_text())
+	# la nota del sargento está en el armero de la comisaría
+	var idx := -1
+	for i in w.layout.story_loot:
+		if "nota_comisaria" in w.layout.story_loot[i]:
+			idx = i
+	check(idx >= 0, "la comisaría guarda una nota")
+	w.containers[idx].erase("rolled")
+	w.containers[idx].erase("gone")
+	w.ensure_loaded([w.containers[idx].pos])
+	p.inv = {"comida": 0, "agua": 0, "vendas": 0, "balas": 0}
+	p._recalc_weight()
+	check(await _open(p, idx), "abro el armero de la comisaría")
+	check(main.hud.cont_loot.has("nota_comisaria"), "y ahí está la nota")
+	p.take(idx, "nota_comisaria", 1)
+	check(await _wait_until(func(): return main.hud.note_panel.visible, 3.0), "al cogerla se lee")
+	check(await _wait_until(func(): return story.stage == 1, 3.0), "y el objetivo avanza: %s" % story.objective_text())
+	main.hud.close_note()
+	main.hud.close_panel()
+	story.read("nota_control")
+	story.event("bateria")
+	await _wait(0.2)
+	check(story.stage == 3, "con la orden y la batería toca ir a la radio")
+	# radio
+	var radio: Vector3 = story.radio_pos()
+	check(radio != Vector3.INF, "el control militar tiene radio")
+	w.ensure_loaded([radio])
+	p.global_position = radio + Vector3(1.2, 0.2, 1.2)
+	p.inv["bateria"] = 1
+	await _wait(0.2)
+	check(p.near_special() == "radio", "me acerco a la radio")
+	p._use_radio()
+	check(await _wait_until(func(): return story.stage == 4, 3.0), "la radio da el día del rescate (%d)" % story.rescue_day)
+	main.hud.close_note()
+	# noche del rescate en la Granja Vieja con una hoguera
+	var farm: Vector3 = story.place_pos("Granja Vieja")
+	w.ensure_loaded([farm])
+	p.global_position = farm + Vector3(4, 0.2, 6)
+	w.structures.request_place("hoguera", farm + Vector3(2, 0, 4), 0.0)
+	w.set_time((story.rescue_day - 1) * 1440.0 + 22.0 * 60.0)
+	check(await _wait_until(func(): return story.stage == 5, 5.0), "de noche, con la hoguera, empieza el rescate")
+	for z in main.zombies.get_children():
+		z.queue_free()
+	story._rescue_t = 1.0
+	check(await _wait_until(func(): return story.stage == 6 and story.heli != null, 5.0), "llega el helicóptero")
+	story._heli_land(true)
+	p.global_position = story.landing_pos() + Vector3(3, 0.2, 0)
+	await _wait(0.2)
+	check(p.near_special() == "helicoptero", "puedo subir")
+	p._start_search()
+	check(await _wait_until(func(): return story.stage == 7, 3.0), "¡rescatados!")
+	check(main.hud.note_panel.visible and main.hud.note_title.text.contains("RESCATADOS"), "y sale el final")
+	main.hud.close_note()
+	main.save_now()
+	check(SaveGame.load_world().get("story", {}).get("stage", 0) == 7, "la historia se guarda")
 
 
 # ------------------------------------------------------------------ construcción (Fase 3)

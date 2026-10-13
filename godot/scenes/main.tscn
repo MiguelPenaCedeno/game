@@ -27,6 +27,12 @@ spawn_path = NodePath("../Zombies")
 _spawnable_scenes = PackedStringArray("res://scenes/vehicle.tscn")
 spawn_path = NodePath("../Vehicles")
 
+[node name="Animals" type="Node3D" parent="."]
+
+[node name="AnimalSpawner" type="MultiplayerSpawner" parent="."]
+_spawnable_scenes = PackedStringArray("res://scenes/animal.tscn")
+spawn_path = NodePath("../Animals")
+
 [node name="MenuCamera" type="Camera3D" parent="."]
 transform = Transform3D(0.707107, -0.353553, 0.612372, 0, 0.866025, 0.5, -0.707107, -0.353553, 0.612372, 38, 30, 38)
 current = true

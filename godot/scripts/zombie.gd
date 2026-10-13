@@ -23,6 +23,13 @@ const LAYER_WORLD := 1
 		if is_node_ready() and dead:
 			_on_died()
 
+## tipo de zombi: normal, corredor, bruto, griton o policia (lo elige el anfitrión)
+@export var variant := "normal":
+	set(value):
+		variant = value
+		if is_inside_tree():
+			_apply_look()
+
 ## posición y giro que se envían por red; los demás equipos se acercan a
 ## ellos suavemente en vez de saltar de golpe
 @export var net_pos := Vector3.ZERO
@@ -54,13 +61,27 @@ var _world: Node
 @onready var figure: HumanFigure = $Figure
 @onready var agent: NavigationAgent3D = $Agent
 
+## vida, velocidad, tamaño, daño que hace, fuerza contra lo construido y daño que encaja
+const VARIANTS := {
+	"normal": {"hp": Vector2(4.5, 6.2), "speed": Vector2(1.05, 1.85), "size": 1.0, "dmg": 1.0, "bash": 1.0, "takes": 1.0},
+	"corredor": {"hp": Vector2(2.6, 3.4), "speed": Vector2(2.3, 2.7), "size": 0.96, "dmg": 0.8, "bash": 0.6, "takes": 1.0},
+	"bruto": {"hp": Vector2(15.0, 18.0), "speed": Vector2(0.85, 1.05), "size": 1.3, "dmg": 1.7, "bash": 3.0, "takes": 1.0},
+	"griton": {"hp": Vector2(3.5, 4.5), "speed": Vector2(1.2, 1.6), "size": 0.98, "dmg": 0.8, "bash": 0.8, "takes": 1.0},
+	"policia": {"hp": Vector2(6.0, 7.5), "speed": Vector2(1.0, 1.5), "size": 1.0, "dmg": 1.1, "bash": 1.0, "takes": 0.6},
+}
+var _screamed := 0.0
+
 const SKINS: Array[Color] = [Color(0.56, 0.6, 0.5), Color(0.5, 0.52, 0.44), Color(0.62, 0.58, 0.5), Color(0.45, 0.48, 0.42)]
 const CLOTH: Array[Color] = [Color(0.36, 0.3, 0.26), Color(0.3, 0.34, 0.38), Color(0.42, 0.38, 0.3), Color(0.5, 0.46, 0.42), Color(0.28, 0.3, 0.26)]
 const PANTS: Array[Color] = [Color(0.22, 0.24, 0.28), Color(0.3, 0.26, 0.2), Color(0.18, 0.18, 0.2)]
 
 
 func _enter_tree() -> void:
-	# el aspecto sale del nombre del nodo, así es igual en todos los equipos
+	_apply_look()
+
+
+## El aspecto sale del nombre del nodo y del tipo, así es igual en todos los equipos.
+func _apply_look() -> void:
 	var r := RandomNumberGenerator.new()
 	r.seed = hash(String(name))
 	var fig := $Figure as HumanFigure
@@ -70,6 +91,36 @@ func _enter_tree() -> void:
 	fig.shirt = CLOTH[r.randi() % CLOTH.size()].lightened(0.15)
 	fig.pants = PANTS[r.randi() % PANTS.size()]
 	fig.hair = Color(0.15, 0.13, 0.11).lerp(Color(0.4, 0.38, 0.34), r.randf())
+	fig.gear = {}
+	var size: float = VARIANTS.get(variant, VARIANTS.normal).size
+	fig.scale = Vector3.ONE * size
+	match variant:
+		"corredor":
+			# flaco y pálido, en ropa de deporte
+			fig.scale = Vector3(0.86, 1.0, 0.86) * size
+			fig.skin = fig.skin.lightened(0.12)
+			fig.jacket = Color(0.55, 0.52, 0.48)
+		"bruto":
+			fig.scale = Vector3(1.22, 1.08, 1.22) * size
+			fig.jacket = Color(0.3, 0.26, 0.22)
+			fig.skin = fig.skin.darkened(0.08)
+		"griton":
+			fig.skin = Color(0.72, 0.74, 0.66)
+			fig.hair = Color(0.62, 0.6, 0.55)
+			fig.jacket = Color(0.62, 0.62, 0.6)
+		"policia":
+			fig.jacket = Color(0.16, 0.2, 0.3)
+			fig.pants = Color(0.14, 0.16, 0.22)
+			fig.gear = {"torso": ["chaleco", Color(0.14, 0.15, 0.17)], "cabeza": ["gorra", Color(0.14, 0.17, 0.27)]}
+	var shape := $Collision.shape as CapsuleShape3D
+	if variant == "bruto" and shape.radius < 0.4:
+		shape = shape.duplicate()
+		shape.radius = 0.46
+		shape.height = 2.0
+		$Collision.shape = shape
+		$Collision.position.y = 1.0
+	if fig.hips != null:
+		fig.rebuild()
 
 
 func _ready() -> void:
@@ -77,8 +128,9 @@ func _ready() -> void:
 	_last_pos = position
 	figure.footstep.connect(func(_soft): Sfx.play_at("step_soft", global_position, -6.0, 0.8, 18.0))
 	if multiplayer.is_server():
-		hp = randf_range(4.5, 6.2)
-		speed = randf_range(1.05, 1.85) * (1.8 if randf() < 0.1 else 1.0)
+		var v: Dictionary = VARIANTS.get(variant, VARIANTS.normal)
+		hp = randf_range(v.hp.x, v.hp.y)
+		speed = randf_range(v.speed.x, v.speed.y)
 		target_pos = position
 		_think = randf() * 0.3
 		if horde:
@@ -194,7 +246,9 @@ func _physics_process(delta: float) -> void:
 				_attack_cd = randf_range(1.0, 1.4)
 				var structures: Node = _world.structures
 				var stype: String = structures.by_id[sid].type
-				structures.damage(sid, randf_range(10.0, 16.0))
+				structures.damage(sid, randf_range(10.0, 16.0) * VARIANTS[variant].bash)
+				if variant == "bruto":
+					_world.spawn_word(global_position + Vector3.UP, "derribo", Color(0.98, 0.95, 0.85), 1.0)
 				if stype == "empalizada":
 					damage(0.6, global_transform.basis.z * 0.5, "fuego")
 			return
@@ -249,7 +303,18 @@ func _sense() -> void:
 		if (heard or seen) and d < best_d:
 			best_d = d
 			best = p
+	_screamed -= 0.25
 	if best:
+		# el gritón avisa a todos los de alrededor
+		if variant == "griton" and state != "chase" and _screamed <= 0.0:
+			_screamed = 20.0
+			_scream_fx.rpc(global_position)
+			for z in get_tree().get_nodes_in_group("zombies"):
+				if z != self and not z.dead and not z.is_in_group("animals") and z.global_position.distance_to(global_position) < 45.0:
+					z.target_player = best
+					z.target_pos = best.global_position
+					z.state = "chase"
+					z.memory = 8.0
 		target_player = best
 		target_pos = best.global_position
 		state = "chase"
@@ -281,7 +346,7 @@ func _try_attack() -> void:
 		return
 	_attack_cd = randf_range(1.0, 1.4)
 	var peer := target_player.name.to_int()
-	target_player.take_hit.rpc_id(peer, randf_range(7.0, 12.0), global_position)
+	target_player.take_hit.rpc_id(peer, randf_range(7.0, 12.0) * VARIANTS[variant].dmg, global_position)
 
 
 ## Lo llama el jugador que golpea o dispara.
@@ -289,8 +354,10 @@ func _try_attack() -> void:
 func damage(amount: float, knock: Vector3, kind := "puños") -> void:
 	if not multiplayer.is_server() or dead:
 		return
-	hp -= amount
-	velocity += knock * 3.0
+	var v: Dictionary = VARIANTS.get(variant, VARIANTS.normal)
+	# el chaleco del policía para golpes; las balas lo atraviesan mejor
+	hp -= amount * (lerpf(v.takes, 1.0, 0.5) if kind == "pistola" else v.takes)
+	velocity += knock * (0.8 if variant == "bruto" else 3.0)
 	_stagger_t = 0.0 if kind == "fuego" else (0.45 if kind != "puños" else 0.25)
 	if hp > 0.0:
 		_fx_hit.rpc(global_position, false, kind)
@@ -305,8 +372,22 @@ func damage(amount: float, knock: Vector3, kind := "puños") -> void:
 	if hp <= 0.0:
 		dead = true
 		_fx_hit.rpc(global_position, true, kind)
+		# los policías llevan algo encima
+		if variant == "policia" and randf() < 0.5:
+			_world.request_drop(Vector3(global_position.x, 0, global_position.z), {"balas": randi_range(2, 6)}, "Cinturón del policía", false)
 		if attacker:
 			attacker.add_kill.rpc_id(attacker.name.to_int())
+
+
+## El grito del gritón: lo oyen todos.
+@rpc("authority", "call_local", "reliable")
+func _scream_fx(pos: Vector3) -> void:
+	Sfx.play_at("scream", pos, 6.0, 1.0, 70.0)
+	if _world:
+		_world.spawn_word(pos + Vector3.UP * 0.4, "grito", Color(0.98, 0.95, 0.85), 1.6)
+	var cam := get_viewport().get_camera_3d()
+	if cam and cam.global_position.distance_to(pos) < 25.0:
+		get_tree().call_group("main", "impact", 0.35)
 
 
 ## Golpe visto por todos: sangre, sonido y onomatopeya.

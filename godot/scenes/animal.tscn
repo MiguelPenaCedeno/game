@@ -1,0 +1,24 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/animal.gd" id="1_animal"]
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_animal"]
+properties/0/path = NodePath(".:net_pos")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+properties/1/path = NodePath(".:net_yaw")
+properties/1/spawn = true
+properties/1/replication_mode = 1
+properties/2/path = NodePath(".:dead")
+properties/2/spawn = true
+properties/2/replication_mode = 2
+properties/3/path = NodePath(".:kind")
+properties/3/spawn = true
+properties/3/replication_mode = 0
+
+[node name="Animal" type="CharacterBody3D"]
+script = ExtResource("1_animal")
+
+[node name="Sync" type="MultiplayerSynchronizer" parent="."]
+replication_interval = 0.05
+replication_config = SubResource("SceneReplicationConfig_animal")

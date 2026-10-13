@@ -7,6 +7,6 @@ script = ExtResource("1_cont")
 id = "cajonera"
 name = "Cajonera"
 time = 1.3
-loot = [["vendas", 0.45, 1, 1], ["comida", 0.25, 1, 1], ["balas", 0.1, 2, 5], ["agua", 0.2, 1, 1], ["clavos", 0.4, 3, 8], ["cinta", 0.3, 1, 1], ["trapos", 0.3, 1, 2]]
+loot = [["vendas", 0.45, 1, 1], ["comida", 0.25, 1, 1], ["balas", 0.1, 2, 5], ["agua", 0.2, 1, 1], ["clavos", 0.4, 3, 8], ["cinta", 0.3, 1, 1], ["trapos", 0.3, 1, 2], ["gorra", 0.1], ["sudadera", 0.1], ["semillas", 0.08, 1, 2]]
 dismantle = [["tablones", 1.0, 2, 3], ["clavos", 1.0, 3, 6]]
 dismantle_time = 4.0

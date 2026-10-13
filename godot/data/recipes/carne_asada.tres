@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="RecipeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/recipe_data.gd" id="1_recipe"]
+
+[resource]
+script = ExtResource("1_recipe")
+id = "carne_asada"
+name = "Carne asada"
+description = "Asa la carne en la hoguera: llena mucho y no sienta mal."
+station = "hoguera"
+ingredients = {"carne_cruda": 1}
+result = "carne_asada"
+result_count = 1
+time = 3.0

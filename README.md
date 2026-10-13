@@ -32,6 +32,9 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
 | E | registrar muebles y maleteros · mantener junto a un compañero caído para levantarlo |
 | Q | cambiar de arma |
 | 1 · 2 · 3 | comer (el guiso primero) · beber · vendarte (con infección, primero los antibióticos) |
+| Tab → Ponerse / Quitar | ropa, cascos, chalecos y mochilas (también *Usar* comida y *Leer* notas) |
+| E (junto a un huerto) | plantar semillas · regar (1 agua) · cosechar |
+| E (junto a la radio o al helicóptero) | usar la radio · subir al helicóptero |
 | 4 | lanzar un cóctel molotov |
 | R / clic derecho | girar / cancelar al colocar una estructura |
 | E (mirando lo construido) | abrir/cerrar puertas · dormir en la cama · reparar (1 tablón o chatarra) |
@@ -88,6 +91,29 @@ es una app desconocida (no está firmada): *Más información → Ejecutar de to
 - **Mapa de papel (M):** todo el condado dibujado como en un cuaderno, tapado donde todavía no
   has estado. Las **marcas** (aquí, peligro, botín, base) se comparten con tu compañero, se
   guardan con la partida y aparecen en el minimapa y flotando en el mundo.
+- **Ropa y mochilas:** cuatro sitios para vestirte (cabeza, torso, piernas y espalda). Gorras,
+  cascos de moto y militares, sudaderas, cazadoras, chaquetas de cuero, chalecos antibalas,
+  vaqueros y pantalones militares paran parte de cada mordisco y hacen menos probable sangrar o
+  infectarte (hasta un 75 %). Las mochilas dan de 4 a 13 kg más de carga. Lo que llevas puesto
+  se ve en tu personaje (también tu compañero lo ve) y se queda en tu cadáver si mueres.
+- **Habilidades:** *combate* (más daño y menos cansancio al golpear), *puntería* (más daño con
+  la pistola), *sigilo* (tus pasos hacen menos ruido; sube moviéndote agachado cerca de zombis),
+  *carpintería* (fabricar, construir, reparar y desmontar más rápido) y *supervivencia* (la
+  comida rinde más, la carne cruda sienta peor, cosechas más). Suben con el uso hasta nivel 5;
+  al morir se olvida una cuarta parte.
+- **Tipos de zombi:** además del normal, el **corredor** (rápido y frágil), el **bruto**
+  (enorme, aguanta muchísimo y derriba lo construido), el **gritón** (al verte grita y atrae a
+  todos los de alrededor) y el **policía** (con chaleco: encaja menos los golpes y a veces lleva
+  balas). Cada día hay más corredores y brutos, sobre todo en las hordas.
+- **Caza:** ciervos y conejos en el campo. Huyen si te ven u oyen (agachado te acercas más).
+  Abatidos dejan **carne cruda**: ásala en la hoguera (cruda puede sentarte fatal).
+- **Huerto:** constrúyelo a mano con 3 tablones, planta **semillas** (salen en arcones,
+  estanterías y tiendas) y riégalo con una botella de agua cada día. En un día y medio de juego
+  regado da **verduras** y más semillas.
+- **Historia:** el objetivo sale bajo el reloj y una marca dorada en el mapa indica adónde ir.
+  Notas en la comisaría, el control militar y el hospital llevan a una **radio sin batería**…
+  y a un **rescate en helicóptero** en la Granja Vieja. Hay que encender una hoguera y aguantar
+  la horda hasta que aterrice. Al subir sale el final, pero puedes seguir jugando.
 - **Minimapa** arriba a la derecha: gira contigo. Cuadraditos amarillos = muebles sin registrar, puntos rojos = zombis cercanos, flechas de color = tus compañeros.
 
 ## Jugar online
@@ -148,9 +174,11 @@ godot/tests/run_all.sh /ruta/a/godot
 ```
 
 Prueba una partida en solitario (registrar, peso, bultos, cadáver, guardado, combate,
-fabricar, construir, hordas, carga por zonas, casas de dos plantas, conducir, mapa, pausa)
+fabricar, construir, hordas, carga por zonas, casas de dos plantas, conducir, mapa, ropa,
+habilidades, tipos de zombi, caza, huerto, la historia de principio a fin, pausa)
 y una partida con dos jugadores conectados (muebles, estructuras, conducir un coche del
-anfitrión, marcas compartidas, levantar al compañero). GitHub las ejecuta en cada cambio.
+anfitrión, marcas compartidas, ropa visible, zombis especiales, historia compartida, levantar
+al compañero). GitHub las ejecuta en cada cambio.
 
 ## Estilo visual: novela gráfica
 
@@ -193,6 +221,8 @@ godot/
   scripts/tile_builder.gd  construye una zona del plano (casas, coches, árboles…)
   scripts/vehicle.gd   coches y furgonetas que se conducen
   scripts/paper_map.gd mapa de papel (M)
+  scripts/animal.gd    ciervos y conejos
+  scripts/story.gd     historia: objetivos, radio y rescate
   lugares/             lugares hechos a mano en el editor (.tscn)
   shaders/             sombreado de cómic y postproceso de tinta
   fonts/               tipografías (licencias OFL / Apache incluidas)
@@ -219,5 +249,6 @@ mapa **semiprocedural con lugares hechos a mano**, y al morir **la mochila queda
 - [x] **Fase 4 · Mundo grande:** mapa de 640 × 640 m por zonas, supermercado, comisaría,
   hospital, gasolineras, granjas, lugares hechos en el editor, casas de dos pisos,
   vehículos con gasolina y copiloto, mapa de papel con marcas compartidas
-- [ ] **Fase 5 · Profundidad:** ropa y mochilas, habilidades, más zombis, granja y caza, historia
+- [x] **Fase 5 · Profundidad:** ropa y mochilas con protección, habilidades, zombis corredores,
+  brutos, gritones y policías, caza, huerto e historia con rescate en helicóptero
 - [ ] **Fase 6 · Pulido:** Android, mando, dificultad configurable

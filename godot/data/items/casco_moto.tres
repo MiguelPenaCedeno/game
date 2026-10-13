@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "casco_moto"
+name = "Casco de moto"
+short = "Casco moto"
+kg = 1.2
+category = "ropa"
+description = "Los mordiscos en la cabeza ya no son problema."
+slot = "cabeza"
+armor = 0.3
+capacity = 0.0
+color = Color(0.75, 0.72, 0.66, 1)
+look = "casco"

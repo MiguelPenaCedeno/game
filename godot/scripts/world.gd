@@ -43,6 +43,8 @@ var _fx_items: Array[Node3D] = []
 var _bags: Node3D
 ## World/Estructuras: lo que construyen los jugadores
 var structures: Node3D
+## World/Historia: notas, radio y rescate
+var story: Node3D
 var _sun: DirectionalLight3D
 var _env: Environment
 ## el anfitrión calcula la navegación de cada zona para los zombis
@@ -76,11 +78,14 @@ func _ready() -> void:
 	helper = TileBuilder.new(layout)
 	_build_environment()
 	_build_ground()
-	for c in layout.containers:
+	for i in layout.containers.size():
+		var c: Dictionary = layout.containers[i]
 		containers.append({
 			"node": null, "mesh": null, "type": c.type, "name": Items.CONTAINERS[c.type].name,
 			"pos": c.pos, "empty": false, "color": c.color, "corpse": false, "floor_y": c.floor_y,
 		})
+		if layout.story_loot.has(i):
+			containers[i].story = layout.story_loot[i]
 	_fx = Node3D.new()
 	_fx.name = "Fx"
 	add_child(_fx)
@@ -92,6 +97,10 @@ func _ready() -> void:
 	structures.set_script(preload("res://scripts/structures.gd"))
 	structures.name = "Estructuras"
 	add_child(structures)
+	story = Node3D.new()
+	story.set_script(preload("res://scripts/story.gd"))
+	story.name = "Historia"
+	add_child(story)
 	ensure_loaded(stream_points())
 
 
@@ -488,6 +497,9 @@ func _update_empty(idx: int) -> void:
 func _ensure_rolled(c: Dictionary) -> void:
 	if not c.get("rolled", false):
 		c.loot = Items.roll_loot(c.type)
+		# las notas y la batería de la historia siempre están en su sitio
+		for k in c.get("story", []):
+			c.loot[k] = 1
 		c.rolled = true
 
 
@@ -566,6 +578,7 @@ func _add_bag(idx: int, pos: Vector3, label: String, corpse: bool) -> void:
 ## mismo orden que en el anfitrión para que los números coincidan.
 func send_state_to(peer: int) -> void:
 	structures.send_state_to(peer)
+	story.send_state_to(peer)
 	var dyn := []
 	for i in range(_static_count, containers.size()):
 		var c: Dictionary = containers[i]
@@ -620,7 +633,7 @@ func export_state() -> Dictionary:
 			dyn.append({"kind": "caja", "sid": c.sid, "pos": st.pos, "rot": st.rot, "loot": c.loot.duplicate()})
 		elif not c.loot.is_empty():
 			dyn.append({"kind": "bolsa", "pos": c.pos, "name": c.name, "corpse": c.corpse, "loot": c.loot.duplicate()})
-	return {"containers": conts, "dynamic": dyn, "gone": gone, "structures": structures.export_state(),
+	return {"containers": conts, "dynamic": dyn, "gone": gone, "structures": structures.export_state(), "story": story.export_state(),
 		"minutes": game_minutes, "markers": _markers_list()}
 
 
@@ -639,6 +652,7 @@ func import_state(d: Dictionary) -> void:
 		if i < _static_count:
 			_set_gone(i)
 	structures.import_state(d.get("structures", []))
+	story.import_state(d.get("story", {}))
 	for m in d.get("markers", []):
 		_add_marker(m[0], m[1], m[2], m[3], m[4])
 	# "bags" es el formato de antes de la Fase 2
@@ -661,6 +675,8 @@ func reset_containers() -> void:
 	_clear_markers()
 	if structures:
 		structures.clear()
+	if story:
+		story.reset()
 	for c in containers.slice(_static_count):
 		if is_instance_valid(c.node):
 			c.node.queue_free()
@@ -869,6 +885,8 @@ const WORDS := {
 	"desmontar": ["¡CRAC!", "¡ÑIIIC!", "¡CLONC!"],
 	"derribo": ["¡CRASH!", "¡CATACROC!"],
 	"horda": ["¡GRAAAH!"],
+	"grito": ["¡AAAAAAAH!", "¡IIIIIIIH!"],
+	"coche": ["¡CATAPLÁN!", "¡PLOF!", "¡CRUNCH!"],
 }
 
 

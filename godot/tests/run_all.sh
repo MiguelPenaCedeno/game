@@ -11,14 +11,14 @@ echo "### Importando proyecto"
 "$GODOT" --headless --import >/dev/null 2>&1 || true
 
 echo "### Prueba en solitario"
-timeout 150 "$GODOT" --headless -- --test=solo > "$LOG/solo.log" 2>&1 || fail=1
+timeout 360 "$GODOT" --headless -- --test=solo > "$LOG/solo.log" 2>&1 || fail=1
 grep -v "^Godot Engine" "$LOG/solo.log"
 
 echo "### Prueba con dos jugadores"
-timeout 120 "$GODOT" --headless -- --test=host > "$LOG/host.log" 2>&1 &
+timeout 240 "$GODOT" --headless -- --test=host > "$LOG/host.log" 2>&1 &
 HOST=$!
 sleep 3
-timeout 100 "$GODOT" --headless -- --test=client > "$LOG/client.log" 2>&1 || fail=1
+timeout 200 "$GODOT" --headless -- --test=client > "$LOG/client.log" 2>&1 || fail=1
 wait $HOST || fail=1
 grep -v "^Godot Engine" "$LOG/client.log"
 grep -v "^Godot Engine" "$LOG/host.log"

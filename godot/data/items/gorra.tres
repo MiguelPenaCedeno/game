@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "gorra"
+name = "Gorra"
+short = "Gorra"
+kg = 0.1
+category = "ropa"
+description = "No para mucho, pero quita el sol de los ojos."
+slot = "cabeza"
+armor = 0.03
+capacity = 0.0
+color = Color(0.22, 0.28, 0.4, 1)
+look = "gorra"

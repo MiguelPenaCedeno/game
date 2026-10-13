@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "pantalon_militar"
+name = "Pantalón militar"
+short = "Pantalón mil."
+kg = 1.0
+category = "ropa"
+description = "Rodilleras incluidas."
+slot = "piernas"
+armor = 0.2
+capacity = 0.0
+color = Color(0.3, 0.33, 0.24, 1)
+look = ""

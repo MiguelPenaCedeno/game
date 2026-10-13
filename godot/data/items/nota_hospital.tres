@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "nota_hospital"
+name = "Hoja de turno, planta baja"
+short = "Nota"
+kg = 0.01
+category = "nota"
+description = "Algo escrito a mano. Léelo desde la mochila."
+text = "Tres baterías de emergencia en el armario de la sala de guardia. Las demás se las llevaron los del ejército.\n\nLos pacientes de la 4 dejaron de respirar a las 2:40. A las 2:55 se levantaron.\n\nNo abráis la puerta del fondo."

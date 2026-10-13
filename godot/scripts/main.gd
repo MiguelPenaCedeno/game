@@ -9,6 +9,7 @@ extends Node3D
 const PLAYER_SCENE := preload("res://scenes/player.tscn")
 const ZOMBIE_SCENE := preload("res://scenes/zombie.tscn")
 const VEHICLE_SCENE := preload("res://scenes/vehicle.tscn")
+const ANIMAL_SCENE := preload("res://scenes/animal.tscn")
 const HUD_SCRIPT := preload("res://scripts/hud.gd")
 ## zombis alrededor de cada jugador (en el pueblo; en el campo hay menos)
 const ZOMBIE_COUNT := 22
@@ -31,6 +32,8 @@ const ACCENT := Color(0.62, 0.06, 0.04)
 @onready var zombies: Node3D = $Zombies
 @onready var world: Node3D = $World
 @onready var vehicles: Node3D = $Vehicles
+@onready var animals: Node3D = $Animals
+var _animal_counter := 0
 ## vehículos del guardado, a la espera de crearse al empezar
 var _saved_vehicles: Array = []
 var _vehicle_counter := 0
@@ -90,6 +93,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause"):
 		if settings_panel.visible:
 			_close_settings()
+		elif hud.note_panel.visible:
+			hud.close_note()
 		elif hud.paper_map.visible:
 			hud.close_map()
 		elif hud.inventory.visible:
@@ -215,6 +220,8 @@ func _back_to_menu(message: String) -> void:
 		z.queue_free()
 	for v in vehicles.get_children():
 		v.queue_free()
+	for a in animals.get_children():
+		a.queue_free()
 	if _zombie_timer:
 		_zombie_timer.stop()
 	if _autosave:
@@ -523,6 +530,7 @@ func _refill_zombies() -> void:
 			z.queue_free()
 			continue
 		alive.append(z)
+	_refill_animals()
 	for p in players.get_children():
 		var around := 0
 		for z in alive:
@@ -534,12 +542,77 @@ func _refill_zombies() -> void:
 			_spawn_zombie(p.global_position)
 
 
+## Ciervos y conejos en el campo, cerca de cada jugador. Desaparecen al alejaros.
+func _refill_animals() -> void:
+	for a in animals.get_children():
+		var near := INF
+		for p in players.get_children():
+			near = minf(near, a.global_position.distance_to(p.global_position))
+		if near > 130.0 and not a.dead:
+			a.queue_free()
+	for p in players.get_children():
+		var pos: Vector3 = p.global_position
+		if world.layout.density_at(pos) > 0.6:
+			continue  # en el pueblo no hay
+		var around := 0
+		for a in animals.get_children():
+			if a.global_position.distance_to(pos) < 90.0:
+				around += 1
+		if around < 3:
+			spawn_animal(pos, "ciervo" if randf() < 0.35 else "conejo")
+
+
+func spawn_animal(near: Vector3, kind: String, dist := Vector2(40.0, 70.0)) -> Node:
+	for attempt in 12:
+		var a := randf() * TAU
+		var p := near + Vector3(cos(a), 0, sin(a)) * randf_range(dist.x, dist.y)
+		if absf(p.x) > world.HALF - 8.0 or absf(p.z) > world.HALF - 8.0:
+			continue
+		if world.layout.blocked(p.x, p.z, 2.0) or world.layout.density_at(p) > 0.6:
+			continue
+		var n := ANIMAL_SCENE.instantiate()
+		_animal_counter += 1
+		n.name = "A%d" % _animal_counter
+		n.kind = kind
+		n.position = Vector3(p.x, 0.3, p.z)
+		n.rotation.y = randf() * TAU
+		n.net_pos = n.position
+		n.net_yaw = n.rotation.y
+		animals.add_child(n, true)
+		return n
+	return null
+
+
 ## Cada día hay más zombis, y de noche más todavía.
 func zombie_target() -> int:
 	var n: int = ZOMBIE_COUNT + (world.day_number() - 1) * 4
 	if world.night:
 		n = int(n * 1.4)
 	return mini(n, ZOMBIE_MAX)
+
+
+## Qué tipo de zombi sale: más corredores y brutos cada día que pasa (y en las hordas);
+## policías cerca de la comisaría y del control militar.
+func pick_variant(pos: Vector3, in_horde := false) -> String:
+	var day: int = world.day_number()
+	var near: String = world.layout.place_at(pos, 60.0)
+	var police := 0.5 if near in ["Comisaría", "Control militar"] else 0.03
+	var runner := minf(0.06 + day * 0.02, 0.22) * (1.6 if in_horde else 1.0)
+	var brute := minf(0.02 + day * 0.012, 0.1) * (1.8 if in_horde else 1.0)
+	var screamer := 0.05
+	var r := randf()
+	if r < police:
+		return "policia"
+	r -= police
+	if r < runner:
+		return "corredor"
+	r -= runner
+	if r < brute:
+		return "bruto"
+	r -= brute
+	if r < screamer:
+		return "griton"
+	return "normal"
 
 
 ## Cuántos zombis rondan por aquí (el pueblo está más lleno que el bosque).
@@ -579,6 +652,7 @@ func _add_zombie(p: Vector3, yaw: float, horde_target := Vector3.INF) -> Node:
 	if horde_target != Vector3.INF:
 		z.horde = true
 		z.horde_target = horde_target
+	z.variant = pick_variant(p, horde_target != Vector3.INF)
 	zombies.add_child(z, true)
 	return z
 
@@ -619,11 +693,13 @@ func _prepare_world() -> void:
 	if d.is_empty():
 		SaveGame.delete_world()
 		world.reset_containers()
+		world.story.start_new()
 		Network.world_id = SaveGame.new_world_id()
 		SaveGame.save_world({"world_id": Network.world_id})
 	else:
 		Network.world_id = d.world_id
 		world.import_state(d)
+		world.story.start_new()
 	new_game_check.button_pressed = false
 
 
@@ -828,6 +904,18 @@ func start_horde() -> void:
 			p = on_nav
 		_add_zombie(p, 0.0, base + Vector3(randf_range(-3, 3), 0, randf_range(-3, 3)))
 	_horde_announce.rpc()
+
+
+## La horda del rescate: rodea la granja mientras llega el helicóptero.
+func rescue_horde(at: Vector3) -> void:
+	var map := get_world_3d().navigation_map
+	for i in 24 + world.day_number():
+		var a := randf() * TAU
+		var p := at + Vector3(cos(a), 0, sin(a)) * randf_range(45.0, 60.0)
+		var on_nav := NavigationServer3D.map_get_closest_point(map, p)
+		if on_nav != Vector3.ZERO and Vector2(on_nav.x - p.x, on_nav.z - p.z).length() < 10.0:
+			p = on_nav
+		_add_zombie(p, 0.0, at + Vector3(randf_range(-6, 6), 0, randf_range(-6, 6)))
 
 
 @rpc("authority", "call_local", "reliable")

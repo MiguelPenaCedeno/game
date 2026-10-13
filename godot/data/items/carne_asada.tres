@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "carne_asada"
+name = "Carne asada"
+short = "Carne asada"
+kg = 0.4
+category = "comida"
+description = "Caliente y jugosa. Llena mucho."
+hunger = 48.0
+heal = 4.0

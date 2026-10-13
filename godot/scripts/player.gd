@@ -68,6 +68,12 @@ const HAIRS: Array[Color] = [Color(0.18, 0.12, 0.08), Color(0.08, 0.07, 0.07), C
 		if is_node_ready():
 			_apply_riding()
 @export var seat := 0
+## ropa puesta, para que los demás la vean: "cabeza:id,torso:id,…"
+@export var outfit := "":
+	set(value):
+		outfit = value
+		if is_node_ready():
+			_apply_outfit()
 
 # --- estadísticas (solo en el equipo del dueño)
 var hp := 100.0
@@ -95,6 +101,20 @@ const REVIVE_TIME := 3.5
 var searched := 0
 var alive_time := 0.0
 var weight := 0.0
+
+## experiencia en cada habilidad; sube con el uso (ver skill_level)
+var skills := {"combate": 0.0, "punteria": 0.0, "sigilo": 0.0, "carpinteria": 0.0, "supervivencia": 0.0}
+const SKILL_NAMES := {"combate": "Combate", "punteria": "Puntería", "sigilo": "Sigilo",
+	"carpinteria": "Carpintería", "supervivencia": "Supervivencia"}
+## experiencia para llegar a cada nivel (1 a 5)
+const SKILL_XP: Array[float] = [20.0, 60.0, 130.0, 230.0, 370.0]
+var _sneak_t := 0.0
+
+## ropa y mochila puestas: ranura -> id del objeto (no pesan en la carga)
+var equipped := {}
+const SLOTS: Array[String] = ["cabeza", "torso", "piernas", "espalda"]
+var _base_jacket := Color.WHITE
+var _base_pants := Color.WHITE
 
 ## vehículo al que te puedes subir (null si ninguno)
 var vehicle_target: Node3D
@@ -139,6 +159,8 @@ func _enter_tree() -> void:
 	fig.jacket = Network.color_for(id).darkened(0.25)
 	fig.skin = SKINS[absi(hash(id)) % SKINS.size()]
 	fig.hair = HAIRS[absi(hash(id * 7)) % HAIRS.size()]
+	_base_jacket = fig.jacket
+	_base_pants = fig.pants
 
 
 func _ready() -> void:
@@ -148,6 +170,7 @@ func _ready() -> void:
 	name_label.text = display_name
 	_apply_crouch()
 	_apply_riding()
+	_apply_outfit()
 	figure.set_weapon(weapon)
 	_world = get_tree().get_first_node_in_group("world")
 
@@ -287,14 +310,14 @@ func _physics_process(delta: float) -> void:
 		velocity.y = JUMP_VELOCITY
 		stamina -= 6
 
-	var can_run := stamina > 2.0 and weight <= Items.CARRY_HEAVY
+	var can_run := stamina > 2.0 and weight <= carry_heavy()
 	var running := captured and Input.is_action_pressed("sprint") and input.y < 0 and not crouching and can_run
 	var speed := WALK_SPEED
 	if crouching:
 		speed = CROUCH_SPEED
 	elif running:
 		speed = RUN_SPEED
-	speed *= Items.speed_factor(weight)
+	speed *= Items.speed_factor(weight, carry_bonus())
 	if stamina < 12 and not running:
 		speed *= 0.8
 	if hp < 25:
@@ -317,7 +340,15 @@ func _physics_process(delta: float) -> void:
 	_noise_spike = maxf(0.0, _noise_spike - delta * 30.0)
 	var step_noise := 0.0
 	if moving:
-		step_noise = 14.0 if running else (1.4 if crouching else 4.5)
+		step_noise = (14.0 if running else (1.4 if crouching else 4.5)) * (1.0 - 0.12 * skill_level("sigilo"))
+		if crouching:
+			_sneak_t += delta
+			if _sneak_t > 1.0:
+				_sneak_t = 0.0
+				for z in get_tree().get_nodes_in_group("zombies"):
+					if not z.dead and not z.is_in_group("animals") and z.global_position.distance_to(global_position) < 14.0:
+						add_xp("sigilo", 0.6)
+						break
 	# redondeado para que solo se envíe por red cuando cambia de verdad
 	var new_noise := snappedf(maxf(step_noise, _noise_spike), 0.5)
 	if new_noise != noise:
@@ -350,6 +381,7 @@ func _physics_process(delta: float) -> void:
 				var mat: String = _world.structures.TYPES[_world.structures.by_id[sid].type].mat if _world.structures.by_id.has(sid) else ""
 				if mat != "" and _remove_item(mat, 1) > 0:
 					_world.structures.request_repair.rpc_id(1, sid)
+					add_xp("carpinteria", 1.0)
 					Sfx.play_at("hit", global_position, -2.0, 1.2)
 				search = {}
 		elif search.has("craft"):
@@ -390,11 +422,11 @@ func _physics_process(delta: float) -> void:
 
 func _update_stats(delta: float, running: bool) -> void:
 	var regen := 9.0 if hunger > 25 and thirst > 25 else 4.0
-	if weight > Items.CARRY_HEAVY:
+	if weight > carry_heavy():
 		regen *= 0.5
 	stamina = clampf(stamina + (-15.0 if running else regen) * delta, 0.0, 100.0)
 	# la carga también da hambre y sed
-	var load_k := 1.0 + maxf(0.0, weight - Items.CARRY_LIGHT) / Items.CARRY_MAX
+	var load_k := 1.0 + maxf(0.0, weight - carry_light()) / carry_max()
 	hunger = maxf(0.0, hunger - 0.17 * delta * load_k)
 	thirst = maxf(0.0, thirst - 0.24 * delta * load_k)
 	if hunger <= 0:
@@ -456,7 +488,7 @@ func consume(k: String) -> void:
 		message.emit("No tienes sed.", false)
 		return
 	inv[k] -= 1
-	hunger = minf(100.0, hunger + it.hunger)
+	hunger = minf(100.0, hunger + it.hunger * (1.0 + 0.06 * skill_level("supervivencia")))
 	thirst = minf(100.0, thirst + it.thirst)
 	hp = minf(100.0, hp + it.heal)
 	var was := bleeding
@@ -465,6 +497,11 @@ func consume(k: String) -> void:
 	var was_infected := infected
 	if it.cures_infection:
 		infected = false
+	if it.sick_chance > 0.0 and randf() < it.sick_chance * (1.0 - 0.15 * skill_level("supervivencia")):
+		hp -= 10.0
+		thirst = maxf(0.0, thirst - 18.0)
+		message.emit("Te sienta fatal. Tendrías que haberla asado.", true)
+		Sfx.play("hurt", -4.0, 0.8)
 	if it.leaves != "":
 		inv[it.leaves] = inv.get(it.leaves, 0) + 1
 	match k:
@@ -499,8 +536,8 @@ func _remove_item(k: String, n: int) -> int:
 ## Cuántas unidades de `k` te caben ahora mismo.
 func fit_count(k: String, n: int) -> int:
 	if Items.WEAPONS.has(k):
-		return 1 if owned.has(k) or weight + Items.kg(k) <= Items.CARRY_MAX + 0.001 else 0
-	return clampi(int(floor((Items.CARRY_MAX - weight) / Items.kg(k) + 0.001)), 0, n)
+		return 1 if owned.has(k) or weight + Items.kg(k) <= carry_max() + 0.001 else 0
+	return clampi(int(floor((carry_max() - weight) / Items.kg(k) + 0.001)), 0, n)
 
 
 ## Pide coger del mueble abierto lo que te quepa.
@@ -538,7 +575,11 @@ func _start_search() -> void:
 		message.emit("Levantando a %s… no te muevas." % revive_target.display_name, false)
 		return
 	if interact_idx < 0:
-		if vehicle_target:
+		if near_special() == "radio":
+			_use_radio()
+		elif near_special() == "helicoptero":
+			_world.story.board.rpc_id(1)
+		elif vehicle_target:
 			enter_vehicle(vehicle_target)
 		elif struct_target >= 0:
 			_use_structure(struct_target)
@@ -554,6 +595,11 @@ func _start_search() -> void:
 
 ## El anfitrión te da algo que pediste coger.
 func _on_item_granted(_idx: int, k: String, n: int) -> void:
+	# las notas se leen al cogerlas; la batería avanza la historia
+	if Items.ITEMS.has(k) and Items.ITEMS[k].category == "nota":
+		get_tree().call_group("hud", "show_note", k)
+	elif k == "bateria":
+		_world.story.event.rpc_id(1, "bateria")
 	if Items.WEAPONS.has(k):
 		owned[k] = Items.WEAPONS[k].dur  # si ya tenías una, cambias la vieja por esta
 		if Items.WEAPON_ORDER.find(k) > Items.WEAPON_ORDER.find(weapon) and k != "pistola":
@@ -597,7 +643,7 @@ func _attack() -> void:
 		_attack_cd = 0.3
 		message.emit("Estás agotado para golpear.", true)
 		return
-	stamina -= w.stam
+	stamina -= w.stam * (1.0 - 0.07 * skill_level("combate"))
 	_attack_cd = w.cd
 	_pending_hit = 0.17
 	attack_count += 1
@@ -626,8 +672,9 @@ func _resolve_melee() -> void:
 	hits.sort_custom(func(a, b): return a[0] < b[0])
 	var n := mini(hits.size(), w.hits)
 	for i in n:
-		hits[i][1].damage.rpc_id(1, w.dmg * randf_range(0.85, 1.2), hits[i][2], weapon)
+		hits[i][1].damage.rpc_id(1, w.dmg * randf_range(0.85, 1.2) * (1.0 + 0.1 * skill_level("combate")), hits[i][2], weapon)
 	if n > 0:
+		add_xp("combate", n)
 		_noise_spike = w.noise
 		shake = maxf(shake, 0.25 if weapon == "puños" else 0.4)
 		if weapon == "hacha":
@@ -652,9 +699,10 @@ func _shoot() -> void:
 	var col: Object = hit.collider
 	if col.is_in_group("zombies") and not col.dead:
 		var head: bool = hit.position.y - col.global_position.y > 1.5
-		var dmg: float = Items.WEAPONS["pistola"].dmg * (2.2 if head else 1.0) * randf_range(0.9, 1.1)
+		var dmg: float = Items.WEAPONS["pistola"].dmg * (2.2 if head else 1.0) * randf_range(0.9, 1.1) * (1.0 + 0.1 * skill_level("punteria"))
 		var dir: Vector3 = (col.global_position - global_position).normalized() * 0.6
 		col.damage.rpc_id(1, dmg, dir, "pistola")
+		add_xp("punteria", 2.5 if head else 1.5)
 
 
 # ------------------------------------------------------------------ daño y muerte
@@ -675,6 +723,8 @@ func take_hit(dmg: float, from: Vector3) -> void:
 		Sfx.play("hurt")
 		shake = maxf(shake, 0.5)
 		return
+	var arm := armor()
+	dmg *= 1.0 - arm
 	hp -= dmg
 	_hurt_flash = 0.35
 	shake = maxf(shake, 0.6)
@@ -685,7 +735,8 @@ func take_hit(dmg: float, from: Vector3) -> void:
 	away.y = 0
 	velocity += away.normalized() * 3.0
 	_world.spawn_blood(global_position, 0.5)
-	var r := randf()
+	# la ropa gruesa también evita que el mordisco llegue a la piel
+	var r := randf() / maxf(1.0 - arm * 1.2, 0.05)
 	if r < 0.07 and not infected:
 		infected = true
 		message.emit("Te han mordido. La herida arde y no deja de latir.", true)
@@ -697,8 +748,12 @@ func take_hit(dmg: float, from: Vector3) -> void:
 
 
 @rpc("any_peer", "call_local", "reliable")
-func add_kill() -> void:
+func add_kill(animal := false) -> void:
+	if animal:
+		add_xp("supervivencia", 5.0)
+		return
 	kills += 1
+	add_xp("punteria" if Items.WEAPONS[weapon].gun else "combate", 3.0)
 
 
 ## Salud a cero: en cooperativo caes al suelo; jugando solo, mueres.
@@ -786,6 +841,14 @@ func _die(cause: String) -> void:
 	for k in owned:
 		if k != "puños":
 			items[k] = 1
+	for slot in equipped:
+		var k: String = equipped[slot]
+		items[k] = int(items.get(k, 0)) + 1
+	equipped = {}
+	_sync_outfit()
+	# al morir se olvida una parte de lo aprendido
+	for k in skills:
+		skills[k] *= 0.75
 	if not items.is_empty():
 		_world.request_drop.rpc_id(1, global_position, items, "Mochila de %s" % display_name, true)
 	inv = {"comida": 0, "agua": 0, "vendas": 0, "balas": 0}
@@ -829,7 +892,7 @@ func export_state() -> Dictionary:
 		"bleeding": bleeding, "infected": infected,
 		"inv": inv.duplicate(), "owned": owned.duplicate(), "weapon": weapon,
 		"kills": kills, "searched": searched, "alive_time": alive_time,
-		"spawn": spawn_point, "explored": explored,
+		"spawn": spawn_point, "explored": explored, "equipped": equipped.duplicate(), "skills": skills.duplicate(),
 	}
 
 
@@ -843,6 +906,8 @@ func try_load() -> void:
 	var ex: PackedByteArray = d.get("explored", PackedByteArray())
 	if ex.size() == PaperMap.CELLS * PaperMap.CELLS:
 		explored = ex
+	if d.is_empty() and _world.story.stage == 0 and DisplayServer.get_name() != "headless":
+		get_tree().call_group("hud", "show_paper", "Radio", _world.story.INTRO)
 	if d.is_empty() or d.get("dead", false):
 		return  # nuevo, o habías muerto: tu mochila te espera en el cadáver
 	global_position = d.pos
@@ -855,6 +920,11 @@ func try_load() -> void:
 	infected = d.infected
 	inv = d.inv
 	owned = d.owned
+	equipped = d.get("equipped", {})
+	for k in d.get("skills", {}):
+		if skills.has(k):
+			skills[k] = float(d.skills[k])
+	_sync_outfit()
 	weapon = d.weapon
 	kills = d.kills
 	searched = d.searched
@@ -931,7 +1001,8 @@ func start_craft(rid: String) -> void:
 	if r.result.begins_with("estructura:"):
 		_start_placing(r)
 		return
-	search = {"craft": r, "t": 0.0, "dur": r.time, "pos": global_position}
+	var skill := "supervivencia" if r.station == "hoguera" else "carpinteria"
+	search = {"craft": r, "t": 0.0, "dur": r.time * (1.0 - 0.08 * skill_level(skill)), "pos": global_position}
 	Sfx.play_at("search", global_position, -4.0, 1.3)
 
 
@@ -951,10 +1022,11 @@ func _finish_craft(r: RecipeData) -> void:
 		inv[r.result] = inv.get(r.result, 0) + r.result_count
 		message.emit("Fabricas %s." % ("%d× %s" % [r.result_count, Items.ITEMS[r.result].name] if r.result_count > 1 else Items.ITEMS[r.result].name).to_lower(), false)
 	Sfx.play("pick")
+	add_xp("supervivencia" if r.station == "hoguera" else "carpinteria", 3.0 if r.station == "hoguera" else 2.0)
 	_recalc_weight()
 	# si te pasas de peso, lo que sobra se queda en el suelo
-	if weight > Items.CARRY_MAX and not Items.WEAPONS.has(r.result) and r.result != "reparar":
-		var extra := mini(inv[r.result], int(ceil((weight - Items.CARRY_MAX) / Items.kg(r.result))))
+	if weight > carry_max() and not Items.WEAPONS.has(r.result) and r.result != "reparar":
+		var extra := mini(inv[r.result], int(ceil((weight - carry_max()) / Items.kg(r.result))))
 		if extra > 0:
 			_remove_item(r.result, extra)
 			_world.request_drop.rpc_id(1, global_position, {r.result: extra}, "Bulto en el suelo", false)
@@ -1030,6 +1102,7 @@ func _confirm_placing() -> void:
 	_recalc_weight()
 	_world.structures.request_place.rpc_id(1, placing.type, placing.ghost.global_position, placing.rot, display_name)
 	_noise_spike = 8.0
+	add_xp("carpinteria", 2.0)
 	_cancel_placing()
 
 
@@ -1047,6 +1120,9 @@ func _use_structure(sid: int) -> void:
 	if s.type == "puerta" and s.hp >= info.hp * 0.999:
 		_world.structures.request_toggle.rpc_id(1, sid)
 		return
+	if s.type == "huerto":
+		_use_garden(sid)
+		return
 	if s.type == "cama":
 		spawn_point = s.pos + Vector3(1.2, 0.2, 0)
 		message.emit("Duermes un rato. Si mueres, reaparecerás aquí.", false)
@@ -1057,7 +1133,7 @@ func _use_structure(sid: int) -> void:
 		if inv.get(info.mat, 0) <= 0:
 			message.emit("Para reparar %s necesitas %s." % [info.name.to_lower(), Items.ITEMS[info.mat].name.to_lower()], true)
 			return
-		search = {"repair": sid, "t": 0.0, "dur": 1.5, "pos": global_position}
+		search = {"repair": sid, "t": 0.0, "dur": 1.5 * (1.0 - 0.08 * skill_level("carpinteria")), "pos": global_position}
 		return
 	if s.type == "puerta":
 		_world.structures.request_toggle.rpc_id(1, sid)
@@ -1071,12 +1147,13 @@ func start_dismantle(idx: int) -> void:
 		return
 	var c: Dictionary = _world.containers[idx]
 	var cd: ContainerData = Items.CONTAINERS[c.type]
-	search = {"dismantle": idx, "t": 0.0, "dur": cd.dismantle_time, "pos": global_position}
+	search = {"dismantle": idx, "t": 0.0, "dur": cd.dismantle_time * (1.0 - 0.08 * skill_level("carpinteria")), "pos": global_position}
 	message.emit("Desmontando %s… hace ruido." % c.name.to_lower(), false)
 
 
 func _finish_dismantle(idx: int) -> void:
 	_world.request_dismantle.rpc_id(1, idx)
+	add_xp("carpinteria", 3.0)
 	_world.spawn_word(_world.containers[idx].pos, "desmontar")
 	shake = maxf(shake, 0.3)
 	# gasta la herramienta (la mejor que lleves)
@@ -1296,3 +1373,195 @@ func _explore() -> void:
 			var mid := Vector2((x + 0.5) * cell - WorldLayout.HALF, (z + 0.5) * cell - WorldLayout.HALF)
 			if mid.distance_to(Vector2(global_position.x, global_position.z)) <= EXPLORE_RADIUS + cell * 0.5:
 				explored[z * cells + x] = 1
+
+
+# ------------------------------------------------------------------ ropa y mochilas
+func carry_bonus() -> float:
+	var b := 0.0
+	for slot in equipped:
+		b += Items.ITEMS[equipped[slot]].capacity
+	return b
+
+
+func carry_max() -> float:
+	return Items.CARRY_MAX + carry_bonus()
+
+
+func carry_heavy() -> float:
+	return Items.CARRY_HEAVY + carry_bonus() * 0.8
+
+
+func carry_light() -> float:
+	return Items.CARRY_LIGHT + carry_bonus() * 0.6
+
+
+## Parte del daño que para lo que llevas puesto.
+func armor() -> float:
+	var a := 0.0
+	for slot in equipped:
+		a += Items.ITEMS[equipped[slot]].armor
+	return minf(a, 0.75)
+
+
+## Ponerse algo de la mochila (lo que llevabas en esa ranura vuelve a la mochila).
+func equip(k: String) -> void:
+	var it: ItemData = Items.ITEMS.get(k)
+	if it == null or it.slot == "" or int(inv.get(k, 0)) <= 0 or dead:
+		return
+	inv[k] -= 1
+	if equipped.has(it.slot):
+		var old: String = equipped[it.slot]
+		inv[old] = int(inv.get(old, 0)) + 1
+	equipped[it.slot] = k
+	_sync_outfit()
+	_recalc_weight()
+	Sfx.play("search", -6.0, 1.5)
+	message.emit("Te pones %s." % it.name.to_lower(), false)
+
+
+func unequip(slot: String) -> void:
+	if not equipped.has(slot):
+		return
+	var k: String = equipped[slot]
+	equipped.erase(slot)
+	inv[k] = int(inv.get(k, 0)) + 1
+	_sync_outfit()
+	_recalc_weight()
+	Sfx.play("search", -6.0, 1.3)
+	if weight > carry_max():
+		message.emit("Sin la %s no puedes con todo." % Items.ITEMS[k].name.to_lower(), true)
+
+
+func _sync_outfit() -> void:
+	var parts := PackedStringArray()
+	for slot in SLOTS:
+		if equipped.has(slot):
+			parts.append("%s:%s" % [slot, equipped[slot]])
+	var o := ",".join(parts)
+	if o != outfit:
+		outfit = o
+
+
+## En todos los equipos: viste la figura con lo que lleva puesto.
+func _apply_outfit() -> void:
+	var gear := {}
+	for part in outfit.split(",", false):
+		var kv := part.split(":")
+		if kv.size() == 2 and Items.ITEMS.has(kv[1]):
+			gear[kv[0]] = Items.ITEMS[kv[1]]
+	figure.jacket = (gear.torso as ItemData).color if gear.has("torso") else _base_jacket
+	figure.pants = (gear.piernas as ItemData).color if gear.has("piernas") else _base_pants
+	var looks := {}
+	for slot in gear:
+		var it: ItemData = gear[slot]
+		if it.look != "":
+			looks[slot] = [it.look, it.color]
+	figure.gear = looks
+	figure.rebuild()
+
+
+# ------------------------------------------------------------------ habilidades
+func skill_level(k: String) -> int:
+	var xp: float = skills.get(k, 0.0)
+	var lvl := 0
+	for need in SKILL_XP:
+		if xp >= need:
+			lvl += 1
+	return lvl
+
+
+func add_xp(k: String, amount: float) -> void:
+	if not is_multiplayer_authority() or not skills.has(k):
+		return
+	var before := skill_level(k)
+	skills[k] += amount
+	var after := skill_level(k)
+	if after > before:
+		message.emit("¡%s sube a nivel %d!" % [SKILL_NAMES[k], after], false)
+		Sfx.play("revive", -2.0, 1.3)
+		_world.spawn_word(global_position + Vector3.UP * 0.5, "¡NIVEL %d!" % after, Color(0.98, 0.86, 0.55), 1.1)
+
+
+## Texto corto para el panel: "Combate 2 · Puntería 0 · …"
+func skills_text() -> String:
+	var parts := PackedStringArray()
+	for k in skills:
+		parts.append("%s %d" % [SKILL_NAMES[k], skill_level(k)])
+	return " · ".join(parts)
+
+
+# ------------------------------------------------------------------ huerto
+## Qué toca hacer en el huerto: "plant", "water", "harvest" o "" (esperar).
+func garden_action(sid: int) -> String:
+	var st: Node = _world.structures
+	var stage: int = st.crop_stage(sid)
+	if stage == 0:
+		return "plant"
+	if stage == 4:
+		return "harvest"
+	# se puede volver a regar a partir de medio día (así nunca se seca si vienes a diario)
+	if _world.game_minutes - float(st.by_id[sid].crop.watered) > st.WATER_LASTS / 2:
+		return "water"
+	return ""
+
+
+func _use_garden(sid: int) -> void:
+	var st: Node = _world.structures
+	match garden_action(sid):
+		"plant":
+			if int(inv.get("semillas", 0)) <= 0:
+				message.emit("Necesitas semillas para plantar.", true)
+				return
+			_remove_item("semillas", 1)
+			st.request_garden.rpc_id(1, sid, "plant")
+			add_xp("supervivencia", 1.0)
+			message.emit("Plantas las semillas. Riégalas cada día (una botella de agua).", false)
+		"water":
+			if int(inv.get("agua", 0)) <= 0:
+				message.emit("Necesitas una botella de agua para regar.", true)
+				return
+			_remove_item("agua", 1)
+			inv["botella_vacia"] = int(inv.get("botella_vacia", 0)) + 1
+			st.request_garden.rpc_id(1, sid, "water")
+			message.emit("Riegas el huerto.", false)
+		"harvest":
+			st.request_garden.rpc_id(1, sid, "harvest")
+		_:
+			var c: Dictionary = st.by_id[sid].crop
+			message.emit("Está creciendo (%d%%). Ya está regado por hoy." % roundi(c.grow / st.RIPE * 100.0), false)
+	_recalc_weight()
+	Sfx.play_at("search", global_position, -4.0, 1.2)
+
+
+## El anfitrión te da lo cosechado.
+func receive_harvest(veg: int, seeds: int) -> void:
+	var bonus := skill_level("supervivencia") / 2
+	inv["verduras"] = int(inv.get("verduras", 0)) + veg + bonus
+	inv["semillas"] = int(inv.get("semillas", 0)) + seeds
+	add_xp("supervivencia", 3.0)
+	_recalc_weight()
+	message.emit("Cosechas %d verduras y %d semillas." % [veg + bonus, seeds], false)
+	Sfx.play("pick")
+
+
+# ------------------------------------------------------------------ historia
+## ¿Estás junto a la radio del control militar o al helicóptero del rescate?
+func near_special() -> String:
+	var story: Node = _world.story
+	var radio: Vector3 = story.radio_pos()
+	if radio != Vector3.INF and Vector2(radio.x - global_position.x, radio.z - global_position.z).length() < 2.2:
+		return "radio"
+	if story.stage == 6 and story.heli and story.heli.global_position.distance_to(global_position) < 9.0:
+		return "helicoptero"
+	return ""
+
+
+func _use_radio() -> void:
+	var story: Node = _world.story
+	var battery := false
+	if story.stage == 3 and int(inv.get("bateria", 0)) > 0:
+		_remove_item("bateria", 1)
+		_recalc_weight()
+		battery = true
+		message.emit("Conectas la batería. La radio se enciende.", false)
+	story.use_radio.rpc_id(1, battery)

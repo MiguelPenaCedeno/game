@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "vaqueros"
+name = "Vaqueros"
+short = "Vaqueros"
+kg = 0.8
+category = "ropa"
+description = "Tela vaquera recia."
+slot = "piernas"
+armor = 0.12
+capacity = 0.0
+color = Color(0.22, 0.28, 0.42, 1)
+look = ""

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "nota_control"
+name = "Orden de evacuación"
+short = "Nota"
+kg = 0.01
+category = "nota"
+description = "Algo escrito a mano. Léelo desde la mochila."
+text = "ORDEN 14-B. Evacuación por aire del personal civil.\n\nPunto de recogida: claro de la Granja Vieja, al oeste.\nProtocolo: contactar con HALCÓN-2 por la radio del puesto e indicar la zona con fuego.\n\n(A mano, debajo:) La radio se quedó sin batería la segunda noche. En el hospital tenían baterías de emergencia para los respiradores. No volvieron los que fueron a buscarlas."

@@ -68,12 +68,16 @@ static func kg(item: String) -> float:
 
 
 ## Multiplicador de velocidad según el peso que llevas.
-static func speed_factor(weight: float) -> float:
-	if weight <= CARRY_LIGHT:
+## `bonus`: kilos de más que da la mochila puesta.
+static func speed_factor(weight: float, bonus := 0.0) -> float:
+	var light := CARRY_LIGHT + bonus * 0.6
+	var heavy := CARRY_HEAVY + bonus * 0.8
+	var top := CARRY_MAX + bonus
+	if weight <= light:
 		return 1.0
-	if weight <= CARRY_HEAVY:
-		return lerpf(1.0, 0.78, (weight - CARRY_LIGHT) / (CARRY_HEAVY - CARRY_LIGHT))
-	return lerpf(0.78, 0.45, clampf((weight - CARRY_HEAVY) / (CARRY_MAX - CARRY_HEAVY), 0.0, 1.0))
+	if weight <= heavy:
+		return lerpf(1.0, 0.78, (weight - light) / (heavy - light))
+	return lerpf(0.78, 0.45, clampf((weight - heavy) / (top - heavy), 0.0, 1.0))
 
 
 static func describe(loot: Dictionary) -> String:

@@ -109,6 +109,8 @@ func _build_all() -> void:
 	streams.wind = _loop(_bandnoise(4.0, 80.0, 500.0, 0.6, true))
 	streams.crickets = _loop(_crickets_wave(3.0))
 	streams.engine = _loop(_engine(1.0))
+	streams.rotor = _loop(_rotor(1.0))
+	streams.scream = _mix([_groan(330, 16), _delay(_groan(300, 11), 0.1), _bandnoise(1.0, 900.0, 3000.0, 0.25)])
 	streams.crash = _mix([_noise(0.35, 1400.0, 1.0), _tone("sine", 70, 30, 0.3, 0.9), _delay(_bandnoise(0.25, 2500.0, 7000.0, 0.35), 0.03)])
 	streams.door = _mix([_tone("square", 160, 90, 0.06, 0.3), _noise(0.08, 900.0, 0.5)])
 	streams.heartbeat = _loop(_mix([_tone("sine", 60, 45, 0.12, 0.9), _delay(_tone("sine", 55, 40, 0.14, 0.7), 0.28), _silence(0.95)]))
@@ -214,6 +216,21 @@ func _engine(dur: float) -> PackedFloat32Array:
 		var x := saw * 0.4 + pulse * 0.9 + _rng.randf_range(-0.25, 0.25)
 		y += k * (x - y)
 		a[i] = y * 0.7
+	return a
+
+
+## Palas del helicóptero: golpes graves de aire 12 veces por segundo.
+func _rotor(dur: float) -> PackedFloat32Array:
+	var n := int(dur * RATE)
+	var a := PackedFloat32Array()
+	a.resize(n)
+	var k := 1.0 - exp(-TAU * 260.0 / RATE)
+	var y := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var chop := pow(1.0 - fmod(t * 12.0, 1.0), 6.0)
+		y += k * (_rng.randf_range(-1.0, 1.0) * (0.25 + chop) - y)
+		a[i] = y * 1.6
 	return a
 
 

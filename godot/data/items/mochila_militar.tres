@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "mochila_militar"
+name = "Mochila militar"
+short = "Mochila mil."
+kg = 1.8
+category = "ropa"
+description = "Llevas 13 kg más."
+slot = "espalda"
+armor = 0.0
+capacity = 13.0
+color = Color(0.3, 0.32, 0.22, 1)
+look = "mochila_grande"

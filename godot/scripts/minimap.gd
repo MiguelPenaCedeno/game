@@ -102,7 +102,7 @@ func _draw() -> void:
 		PaperMap.draw_marker(self, at, m.kind, m.color, 0.6)
 	# zombis cercanos
 	for z in get_tree().get_nodes_in_group("zombies"):
-		if z.dead or z.global_position.distance_to(player.global_position) > RANGE * 0.8:
+		if z.dead or z.is_in_group("animals") or z.global_position.distance_to(player.global_position) > RANGE * 0.8:
 			continue
 		draw_circle(to_map.call(z.global_position.x, z.global_position.z), 3.2, ZOMBIE)
 	# compañeros
