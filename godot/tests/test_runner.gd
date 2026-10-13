@@ -555,7 +555,8 @@ func _test_big_map(p: Node, w: Node) -> void:
 	w.update_roofs(hc + Vector3.UP * WorldLayout.WALL_H)
 	check(w._roof_state.get("upper") == null and w._roof_state.get("roof") != null, "y arriba solo el tejado")
 
-	# antibióticos
+	# antibióticos (sin sangrar: sangrando, la tecla 3 tira antes de vendas)
+	p.bleeding = false
 	p.infected = true
 	p.inv["antibioticos"] = 1
 	p.use_item("vendas")
