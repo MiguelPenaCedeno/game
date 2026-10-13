@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="ContainerData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/container_data.gd" id="1_cont"]
+
+[resource]
+script = ExtResource("1_cont")
+id = "armario"
+name = "Armario"
+time = 1.3
+loot = [["vendas", 0.5, 1, 2], ["balas", 0.14, 3, 7], ["bate", 0.16], ["hacha", 0.08], ["pistola", 0.035], ["comida", 0.15, 1, 1]]

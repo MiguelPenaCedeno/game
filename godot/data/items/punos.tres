@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "puños"
+name = "Puños"
+short = "Puños"
+kg = 0.0
+category = "arma"
+is_weapon = true
+weapon_order = 0
+dmg = 1.1
+reach = 1.5
+cd = 0.45
+stam = 4.0
+noise = 6.0
+dur = -1
+hits = 1
+in_backpack = false

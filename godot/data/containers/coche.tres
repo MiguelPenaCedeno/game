@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="ContainerData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/container_data.gd" id="1_cont"]
+
+[resource]
+script = ExtResource("1_cont")
+id = "coche"
+name = "Maletero"
+time = 1.8
+loot = [["agua", 0.35, 1, 1], ["comida", 0.3, 1, 1], ["vendas", 0.2, 1, 1], ["bate", 0.06], ["balas", 0.07, 2, 4]]

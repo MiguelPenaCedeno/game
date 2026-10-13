@@ -39,6 +39,10 @@ var _zombie_timer: Timer
 
 func _ready() -> void:
 	menu_camera.look_at_from_position(Vector3(30, 14, 34), Vector3(4, 0, 6))
+	# el menú y la interfaz siguen vivos en pausa; el mundo no
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	for n in [world, players, zombies]:
+		n.process_mode = Node.PROCESS_MODE_PAUSABLE
 	_add_ink_pass()
 	_build_ui()
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -159,6 +163,7 @@ func _back_to_menu(message: String) -> void:
 		_zombie_timer.stop()
 	world.reset_containers()
 	menu_camera.current = true
+	get_tree().paused = false
 	pause_panel.visible = false
 	hud.visible = false
 	hud.player = null
@@ -168,8 +173,9 @@ func _back_to_menu(message: String) -> void:
 
 
 func _set_paused(open: bool) -> void:
-	# la partida no se detiene: con otra persona conectada el mundo sigue
+	# jugando solo se detiene todo; con otra persona conectada el mundo sigue
 	pause_panel.visible = open
+	get_tree().paused = open and not Network.is_online()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
 
 
@@ -389,6 +395,7 @@ func _start_zombies() -> void:
 		_spawn_zombie()
 	if _zombie_timer == null:
 		_zombie_timer = Timer.new()
+		_zombie_timer.process_mode = Node.PROCESS_MODE_PAUSABLE
 		_zombie_timer.wait_time = 15.0
 		_zombie_timer.timeout.connect(_refill_zombies)
 		add_child(_zombie_timer)
@@ -424,5 +431,7 @@ func _spawn_zombie() -> void:
 		z.name = "Z%d" % _zombie_counter
 		z.position = p + Vector3.UP * 0.1
 		z.rotation.y = randf() * TAU
+		z.net_pos = z.position
+		z.net_yaw = z.rotation.y
 		zombies.add_child(z, true)
 		return

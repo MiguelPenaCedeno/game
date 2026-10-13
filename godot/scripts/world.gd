@@ -76,6 +76,7 @@ func _ready() -> void:
 	_build_trees()
 	_build_debris()
 	_build_bounds()
+	_batch_static()
 	# a partir de aquí el azar ya no tiene que coincidir entre equipos
 	rng = RandomNumberGenerator.new()
 	rng.randomize()
@@ -200,6 +201,7 @@ func reset_containers() -> void:
 
 
 func _register_container(body: Node3D, type: String, color: Color) -> void:
+	body.add_to_group("dynamic")
 	var mesh: MeshInstance3D = body.find_children("*", "MeshInstance3D", false, false)[0]
 	containers.append({
 		"node": body, "mesh": mesh, "type": type, "name": Items.CONTAINERS[type].name,
@@ -380,6 +382,7 @@ func _build_house(cx: float, cz: float, w: float, d: float, door_side: String) -
 func _build_roof(house: Node3D, cx: float, cz: float, w: float, d: float) -> void:
 	var roof := Node3D.new()
 	roof.name = "Tejado"
+	roof.add_to_group("dynamic")
 	house.add_child(roof)
 	var color: Color = ROOF_COLORS[rng.randi() % ROOF_COLORS.size()]
 	var h := rng.randf_range(1.6, 2.2)
@@ -658,6 +661,85 @@ func _build_bounds() -> void:
 	for s in [-1.0, 1.0]:
 		_collider(Vector3(s * HALF, 5, 0), Vector3(1, 10, HALF * 2))
 		_collider(Vector3(0, 5, s * HALF), Vector3(HALF * 2, 10, 1))
+
+
+# ------------------------------------------------------------------ fusión de geometría
+const CHUNK := 24.0
+var _batch_mats := {}
+
+
+## Une todas las piezas que no cambian nunca en pocas mallas grandes por zona,
+## y sus colisiones en un solo cuerpo por zona. Lo que cambia en juego
+## (tejados, muebles registrables) va en el grupo "dynamic" y se queda suelto.
+## Pasa de miles de piezas a unas decenas.
+func _batch_static() -> void:
+	var batcher := MeshBatcher.new()
+	var to_free: Array[Node] = []
+	for mi: MeshInstance3D in find_children("*", "MeshInstance3D", true, false):
+		if _is_dynamic(mi):
+			continue
+		var mat := mi.material_override as ShaderMaterial
+		if mat == null or mi.mesh == null:
+			continue
+		var grit: float = mat.get_shader_parameter("grit")
+		var grit_scale: float = mat.get_shader_parameter("grit_scale")
+		var gp := mi.global_position
+		var chunk := Vector2i(floori(gp.x / CHUNK), floori(gp.z / CHUNK))
+		var key := [chunk, grit, grit_scale, mi.cast_shadow]
+		batcher.add(mi.mesh, mi.global_transform, key, _batch_mat(grit, grit_scale),
+			mat.get_shader_parameter("albedo"), mi.cast_shadow)
+		to_free.append(mi)
+
+	var chunks := {}
+	for body: StaticBody3D in find_children("*", "StaticBody3D", true, false):
+		if _is_dynamic(body):
+			continue
+		var gp := body.global_position
+		var chunk := Vector2i(floori(gp.x / CHUNK), floori(gp.z / CHUNK))
+		if not chunks.has(chunk):
+			var cb := StaticBody3D.new()
+			cb.name = "Colision_%d_%d" % [chunk.x, chunk.y]
+			add_child(cb)
+			chunks[chunk] = cb
+		for cs in body.get_children():
+			if cs is CollisionShape3D:
+				var xf: Transform3D = cs.global_transform
+				body.remove_child(cs)
+				chunks[chunk].add_child(cs)
+				cs.global_transform = xf
+		to_free.append(body)
+
+	var geo := Node3D.new()
+	geo.name = "Geometria"
+	add_child(geo)
+	batcher.build(geo, "Zona")
+	for n in to_free:
+		if is_instance_valid(n):
+			n.free()
+	# quitar los nodos contenedores que se quedaron vacíos (casas, coches…)
+	for n in get_children():
+		if n is Node3D and n.get_child_count() == 0 and n.get_class() == "Node3D":
+			n.free()
+
+
+func _is_dynamic(n: Node) -> bool:
+	while n != null and n != self:
+		if n.is_in_group("dynamic"):
+			return true
+		n = n.get_parent()
+	return false
+
+
+func _batch_mat(grit: float, grit_scale: float) -> ShaderMaterial:
+	var key := Vector2(grit, grit_scale)
+	if not _batch_mats.has(key):
+		var m := ShaderMaterial.new()
+		m.shader = TOON
+		m.set_shader_parameter("albedo", Color.WHITE)
+		m.set_shader_parameter("grit", grit)
+		m.set_shader_parameter("grit_scale", grit_scale)
+		_batch_mats[key] = m
+	return _batch_mats[key]
 
 
 # ------------------------------------------------------------------ utilidades

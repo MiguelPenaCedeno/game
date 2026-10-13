@@ -1,36 +1,40 @@
 class_name Items
 extends RefCounted
-## Datos de objetos, armas y botín. Los valores salen de la versión web,
-## más el peso de cada cosa.
+## Objetos, armas, botín y reglas de carga.
+## Los objetos, armas y muebles se cargan de res://data/ (archivos .tres que
+## se editan desde Godot). Aquí solo quedan las reglas.
 
-## nombre visible y peso en kg por unidad
-const ITEMS := {
-	"comida": {"name": "Comida enlatada", "short": "Comida", "kg": 0.4},
-	"agua": {"name": "Botella de agua", "short": "Agua", "kg": 0.5},
-	"vendas": {"name": "Vendas", "short": "Vendas", "kg": 0.05},
-	"balas": {"name": "Balas", "short": "Balas", "kg": 0.02},
-	"bate": {"name": "Bate de béisbol", "short": "Bate", "kg": 1.0},
-	"hacha": {"name": "Hacha", "short": "Hacha", "kg": 2.2},
-	"pistola": {"name": "Pistola", "short": "Pistola", "kg": 0.9},
-}
+## id -> ItemData (todo lo que puede ir en la mochila, más los puños)
+static var ITEMS := {}
+## id -> ItemData, solo las armas
+static var WEAPONS := {}
+## ids de las armas en el orden en que se cambian con Q
+static var WEAPON_ORDER: Array[String] = []
+## id -> ContainerData
+static var CONTAINERS := {}
 
-## Armas: daño, alcance, enfriamiento, energía, ruido, durabilidad (golpes), objetivos por golpe
-const WEAPONS := {
-	"puños": {"name": "Puños", "dmg": 1.1, "range": 1.5, "cd": 0.45, "stam": 4.0, "noise": 6.0, "dur": -1, "hits": 1},
-	"bate": {"name": "Bate", "dmg": 2.6, "range": 2.1, "cd": 0.65, "stam": 7.0, "noise": 9.0, "dur": 35, "hits": 2},
-	"hacha": {"name": "Hacha", "dmg": 4.6, "range": 2.0, "cd": 0.85, "stam": 10.0, "noise": 9.0, "dur": 50, "hits": 1},
-	"pistola": {"name": "Pistola", "dmg": 4.2, "range": 60.0, "cd": 0.32, "stam": 0.0, "noise": 48.0, "dur": -1, "hits": 1, "gun": true},
-}
-const WEAPON_ORDER: Array[String] = ["puños", "bate", "hacha", "pistola"]
 
-## Contenedores: nombre visible y tabla de botín [objeto, probabilidad, mín, máx]
-const CONTAINERS := {
-	"nevera": {"name": "Nevera", "time": 1.3, "loot": [["comida", .85, 1, 3], ["agua", .75, 1, 2]]},
-	"armario": {"name": "Armario", "time": 1.3, "loot": [["vendas", .5, 1, 2], ["balas", .14, 3, 7], ["bate", .16], ["hacha", .08], ["pistola", .035], ["comida", .15, 1, 1]]},
-	"cajonera": {"name": "Cajonera", "time": 1.3, "loot": [["vendas", .45, 1, 1], ["comida", .25, 1, 1], ["balas", .1, 2, 5], ["agua", .2, 1, 1]]},
-	"estanteria": {"name": "Estantería", "time": 1.3, "loot": [["comida", .5, 1, 2], ["agua", .45, 1, 2], ["vendas", .2, 1, 1]]},
-	"coche": {"name": "Maletero", "time": 1.8, "loot": [["agua", .35, 1, 1], ["comida", .3, 1, 1], ["vendas", .2, 1, 1], ["bate", .06], ["balas", .07, 2, 4]]},
-}
+static func _static_init() -> void:
+	for res in _load_dir("res://data/items/"):
+		var it := res as ItemData
+		ITEMS[it.id] = it
+		if it.is_weapon:
+			WEAPONS[it.id] = it
+	var weapons := WEAPONS.values()
+	weapons.sort_custom(func(a, b): return a.weapon_order < b.weapon_order)
+	for w in weapons:
+		WEAPON_ORDER.append(w.id)
+	for res in _load_dir("res://data/containers/"):
+		CONTAINERS[res.id] = res
+
+
+static func _load_dir(dir: String) -> Array[Resource]:
+	var out: Array[Resource] = []
+	for f in ResourceLoader.list_directory(dir):
+		if f.ends_with(".tres") or f.ends_with(".res"):
+			out.append(load(dir + f))
+	return out
+
 
 ## Carga: hasta CARRY_LIGHT vas normal; a partir de ahí cada vez más lento.
 ## Por encima de CARRY_MAX ya no puedes recoger más.
@@ -41,7 +45,7 @@ const CARRY_MAX := 20.0
 
 static func roll_loot(type: String) -> Dictionary:
 	var out := {}
-	for entry in CONTAINERS[type].loot:
+	for entry in (CONTAINERS[type] as ContainerData).loot:
 		if randf() < entry[1]:
 			var lo: int = entry[2] if entry.size() > 2 else 1
 			var hi: int = entry[3] if entry.size() > 3 else 1

@@ -28,7 +28,8 @@ void vertex() {
 }
 
 void fragment() {
-	vec3 c = albedo.rgb;
+	// las mallas fusionadas llevan su color en los vértices (blanco si no)
+	vec3 c = albedo.rgb * COLOR.rgb;
 	if (grit > 0.0) {
 		// proyección triplanar barata: cada cara usa el plano que le toca
 		vec3 an = abs(world_normal);

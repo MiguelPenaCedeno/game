@@ -40,8 +40,51 @@ var _weapon := ""
 var _gun := false
 
 
+static var _shared_mat: ShaderMaterial
+var _merged: Array[MeshInstance3D] = []
+var _shadows := true
+
+
 func _ready() -> void:
 	_build()
+	_merge_parts()
+
+
+## Une las piezas de cada articulación en una sola malla (de ~32 a ~12 por figura).
+## Los ojos brillantes y el arma de la mano se quedan aparte.
+func _merge_parts() -> void:
+	if _shared_mat == null:
+		_shared_mat = ShaderMaterial.new()
+		_shared_mat.shader = TOON
+		_shared_mat.set_shader_parameter("albedo", Color.WHITE)
+		_shared_mat.set_shader_parameter("grit", 0.12)
+		_shared_mat.set_shader_parameter("grit_scale", 9.0)
+	var joints: Array[Node3D] = [self]
+	for n in find_children("*", "Node3D", true, false):
+		if not n is MeshInstance3D:
+			joints.append(n)
+	for j in joints:
+		var batcher := MeshBatcher.new()
+		var parts: Array[MeshInstance3D] = []
+		for c in j.get_children():
+			if c is MeshInstance3D and not c.has_meta("keep"):
+				var mat := (c as MeshInstance3D).material_override as ShaderMaterial
+				batcher.add(c.mesh, c.transform, 0, _shared_mat, mat.get_shader_parameter("albedo"))
+				parts.append(c)
+		if parts.size() < 2:
+			continue
+		for c in parts:
+			c.free()
+		_merged.append_array(batcher.build(j, "Pieza"))
+
+
+## Las figuras lejanas no proyectan sombra (ahorra mucho).
+func set_shadows(on: bool) -> void:
+	if on == _shadows:
+		return
+	_shadows = on
+	for mi in find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if on else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func _mat(color: Color, emission := 0.0) -> ShaderMaterial:
@@ -139,6 +182,7 @@ func _build() -> void:
 		var eye := _part(head, _sphere(0.018), eye_col, Vector3(0.042 * s, 0.115, -0.1))
 		if zombie:
 			eye.material_override = _mat(eye_col, 2.5)
+			eye.set_meta("keep", true)
 		# cejas
 		_part(head, _box(Vector3(0.05, 0.012, 0.02)), hair, Vector3(0.045 * s, 0.15, -0.105), Vector3.ONE, Vector3(0, 0, -0.15 * s))
 	# pelo: casquete con algo de volumen atrás

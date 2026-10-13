@@ -129,9 +129,9 @@ func _process(_delta: float) -> void:
 	slots.comida.text = str(player.inv.comida)
 	slots.agua.text = str(player.inv.agua)
 	slots.vendas.text = str(player.inv.vendas)
-	var w: Dictionary = Items.WEAPONS[player.weapon]
+	var w: ItemData = Items.WEAPONS[player.weapon]
 	weapon_slot.text = w.name
-	if w.get("gun", false):
+	if w.gun:
 		weapon_info.text = "%d balas" % player.inv.balas
 	elif player.owned.get(player.weapon, -1) > 0:
 		weapon_info.text = "%d golpes" % player.owned[player.weapon]

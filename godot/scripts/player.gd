@@ -35,6 +35,10 @@ const HAIRS: Array[Color] = [Color(0.18, 0.12, 0.08), Color(0.08, 0.07, 0.07), C
 		crouching = value
 		if is_node_ready():
 			_apply_crouch()
+## posición y giro que se envían por red; los demás equipos se acercan a
+## ellos suavemente en vez de saltar de golpe
+@export var net_pos := Vector3.ZERO
+@export var net_yaw := 0.0
 @export var dead := false
 @export var weapon := "puños":
 	set(value):
@@ -119,10 +123,16 @@ func _ready() -> void:
 	else:
 		set_physics_process(false)
 		set_process_unhandled_input(false)
+		position = net_pos
 	_last_pos = position
 
 
 func _process(delta: float) -> void:
+	if is_multiplayer_authority():
+		net_pos = position
+		net_yaw = rotation.y
+	else:
+		_net_smooth(delta)
 	# la velocidad se mide por el desplazamiento, así también anima a los remotos
 	var moved := Vector2(position.x - _last_pos.x, position.z - _last_pos.z).length() / maxf(delta, 1e-4)
 	_last_pos = position
@@ -214,7 +224,10 @@ func _physics_process(delta: float) -> void:
 	var step_noise := 0.0
 	if moving:
 		step_noise = 14.0 if running else (1.4 if crouching else 4.5)
-	noise = maxf(step_noise, _noise_spike)
+	# redondeado para que solo se envíe por red cuando cambia de verdad
+	var new_noise := snappedf(maxf(step_noise, _noise_spike), 0.5)
+	if new_noise != noise:
+		noise = new_noise
 
 	# combate
 	_attack_cd -= delta
@@ -398,8 +411,8 @@ func _cycle_weapon() -> void:
 func _attack() -> void:
 	if _attack_cd > 0.0 or not search.is_empty():
 		return
-	var w: Dictionary = Items.WEAPONS[weapon]
-	if w.get("gun", false):
+	var w: ItemData = Items.WEAPONS[weapon]
+	if w.gun:
 		if inv.balas <= 0:
 			_attack_cd = 0.3
 			message.emit("No te quedan balas.", true)
@@ -423,7 +436,7 @@ func _attack() -> void:
 
 
 func _resolve_melee() -> void:
-	var w: Dictionary = Items.WEAPONS[weapon]
+	var w: ItemData = Items.WEAPONS[weapon]
 	var fwd := -global_transform.basis.z
 	var hits := []
 	for z in get_tree().get_nodes_in_group("zombies"):
@@ -432,7 +445,7 @@ func _resolve_melee() -> void:
 		var to: Vector3 = z.global_position - global_position
 		to.y = 0
 		var d := to.length()
-		if d > w.range + 0.25:
+		if d > w.reach + 0.25:
 			continue
 		if d > 0.8 and fwd.angle_to(to) > 1.05:
 			continue
@@ -456,7 +469,7 @@ func _resolve_melee() -> void:
 
 
 func _shoot() -> void:
-	_noise_spike = Items.WEAPONS.pistola.noise
+	_noise_spike = Items.WEAPONS["pistola"].noise
 	var from := camera.global_position
 	var to := from - camera.global_transform.basis.z * 60.0
 	var q := PhysicsRayQueryParameters3D.create(from, to, LAYER_WORLD | LAYER_ZOMBIES, [get_rid()])
@@ -466,7 +479,7 @@ func _shoot() -> void:
 	var col: Object = hit.collider
 	if col.is_in_group("zombies") and not col.dead:
 		var head: bool = hit.position.y - col.global_position.y > 1.5
-		var dmg: float = Items.WEAPONS.pistola.dmg * (2.2 if head else 1.0) * randf_range(0.9, 1.1)
+		var dmg: float = Items.WEAPONS["pistola"].dmg * (2.2 if head else 1.0) * randf_range(0.9, 1.1)
 		var dir: Vector3 = (col.global_position - global_position).normalized() * 0.6
 		col.damage.rpc_id(1, dmg, dir)
 
@@ -535,3 +548,12 @@ func hurt_flash() -> float:
 func _apply_crouch() -> void:
 	pivot.position.y = 1.15 if crouching else 1.55
 	name_label.position.y = 1.75 if crouching else 2.15
+
+
+## En los equipos que no mandan sobre este nodo: acercarse suavemente a lo recibido.
+func _net_smooth(delta: float) -> void:
+	if position.distance_squared_to(net_pos) > 16.0:
+		position = net_pos  # teletransporte o reaparición
+	else:
+		position = position.lerp(net_pos, 1.0 - exp(-14.0 * delta))
+	rotation.y = lerp_angle(rotation.y, net_yaw, 1.0 - exp(-14.0 * delta))

@@ -17,6 +17,11 @@ const LAYER_WORLD := 1
 		if is_node_ready() and dead:
 			_on_died()
 
+## posición y giro que se envían por red; los demás equipos se acercan a
+## ellos suavemente en vez de saltar de golpe
+@export var net_pos := Vector3.ZERO
+@export var net_yaw := 0.0
+
 var hp := 5.0
 var speed := 1.4
 var state := "wander"
@@ -30,7 +35,8 @@ var _stuck_t := 0.0
 var _last_pos := Vector3.ZERO
 var _ground_speed := 0.0
 var _dead_t := 0.0
-var _groan_t := 0.0
+var _path_target := Vector3.INF
+var _anim_skip := false
 
 @onready var figure: HumanFigure = $Figure
 @onready var agent: NavigationAgent3D = $Agent
@@ -62,11 +68,18 @@ func _ready() -> void:
 		_think = randf() * 0.3
 	else:
 		set_physics_process(false)
+		position = net_pos
+		rotation.y = net_yaw
 	if dead:
 		_on_died()
 
 
 func _process(delta: float) -> void:
+	if multiplayer.is_server():
+		net_pos = position
+		net_yaw = rotation.y
+	else:
+		_net_smooth(delta)
 	var moved := Vector2(position.x - _last_pos.x, position.z - _last_pos.z).length() / maxf(delta, 1e-4)
 	_last_pos = position
 	if dead:
@@ -78,7 +91,13 @@ func _process(delta: float) -> void:
 			queue_free()
 		return
 	_ground_speed = lerpf(_ground_speed, minf(moved, 6.0), clampf(delta * 8.0, 0.0, 1.0))
-	figure.animate(delta, _ground_speed, false)
+	# lejos de la cámara: sin sombra y animación a medio ritmo
+	var cam := get_viewport().get_camera_3d()
+	var far := cam != null and cam.global_position.distance_squared_to(global_position) > 28.0 * 28.0
+	figure.set_shadows(not far)
+	_anim_skip = not _anim_skip if far else false
+	if not _anim_skip:
+		figure.animate(delta * (2.0 if far else 1.0), _ground_speed, false)
 
 
 func _physics_process(delta: float) -> void:
@@ -110,7 +129,10 @@ func _physics_process(delta: float) -> void:
 				spd = 0.0
 		dest = target_pos
 
-	agent.target_position = dest
+	# recalcular la ruta solo cuando el destino se mueve de verdad
+	if dest.distance_squared_to(_path_target) > 0.6:
+		_path_target = dest
+		agent.target_position = dest
 	var next := agent.get_next_path_position()
 	var to := next - global_position
 	to.y = 0
@@ -212,3 +234,12 @@ func _on_died() -> void:
 	collision_layer = 0
 	collision_mask = LAYER_WORLD
 	velocity = Vector3.ZERO
+
+
+## En los equipos que no mandan sobre este nodo: acercarse suavemente a lo recibido.
+func _net_smooth(delta: float) -> void:
+	if position.distance_squared_to(net_pos) > 16.0:
+		position = net_pos  # teletransporte o reaparición
+	else:
+		position = position.lerp(net_pos, 1.0 - exp(-14.0 * delta))
+	rotation.y = lerp_angle(rotation.y, net_yaw, 1.0 - exp(-14.0 * delta))

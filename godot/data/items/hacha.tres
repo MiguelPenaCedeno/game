@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/item_data.gd" id="1_item"]
+
+[resource]
+script = ExtResource("1_item")
+id = "hacha"
+name = "Hacha"
+short = "Hacha"
+kg = 2.2
+category = "arma"
+is_weapon = true
+weapon_order = 2
+dmg = 4.6
+reach = 2.0
+cd = 0.85
+stam = 10.0
+noise = 9.0
+dur = 50
+hits = 1
