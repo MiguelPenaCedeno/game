@@ -1174,15 +1174,25 @@ func _test_building(p: Node, w: Node) -> void:
 	var hordes: Array = main.zombies.get_children().filter(func(zz): return zz.horde)
 	check(hordes.size() >= 14, "llega una horda (%d zombis)" % hordes.size())
 	var base: Vector3 = main._base_position()
-	var d0 := 0.0
+	var start := {}
 	for hz in hordes:
-		d0 += hz.global_position.distance_to(base)
+		start[hz] = hz.global_position
 	await _wait(4.0)
-	var d1 := 0.0
+	# cada zombi por separado: uno que se queda atascado o cae no tapa a los demás
+	var closer := 0
+	var alive := 0
+	var odd := ""
 	for hz in hordes:
-		if is_instance_valid(hz):
-			d1 += hz.global_position.distance_to(base)
-	check(d1 < d0 - 10.0, "y avanza hacia la base (%.0f -> %.0f m)" % [d0, d1])
+		if not is_instance_valid(hz):
+			continue
+		alive += 1
+		var p0: Vector3 = start[hz]
+		if hz.global_position.distance_to(base) < p0.distance_to(base) - 1.0:
+			closer += 1
+		elif odd == "":
+			odd = "%s -> %s" % [p0.snapped(Vector3.ONE * 0.1), hz.global_position.snapped(Vector3.ONE * 0.1)]
+	check(alive > 0 and closer * 3 >= alive * 2, "y avanza hacia la base (%d de %d se acercan%s)" % [
+		closer, alive, "; uno no: " + odd if odd != "" else ""])
 	for hz in hordes:
 		if is_instance_valid(hz):
 			hz.queue_free()
