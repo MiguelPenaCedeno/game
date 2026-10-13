@@ -20,8 +20,22 @@ properties/2/replication_mode = 2
 properties/3/path = NodePath(".:crouching")
 properties/3/spawn = true
 properties/3/replication_mode = 2
+properties/4/path = NodePath(".:dead")
+properties/4/spawn = true
+properties/4/replication_mode = 2
+properties/5/path = NodePath(".:weapon")
+properties/5/spawn = true
+properties/5/replication_mode = 2
+properties/6/path = NodePath(".:noise")
+properties/6/spawn = true
+properties/6/replication_mode = 1
+properties/7/path = NodePath(".:attack_count")
+properties/7/spawn = true
+properties/7/replication_mode = 2
 
 [node name="Player" type="CharacterBody3D"]
+collision_layer = 2
+collision_mask = 7
 script = ExtResource("1_player")
 
 [node name="Collision" type="CollisionShape3D" parent="."]
@@ -43,6 +57,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.55, 0)
 
 [node name="SpringArm" type="SpringArm3D" parent="CameraPivot"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.6, 0, 0)
+collision_mask = 1
 spring_length = 2.7
 margin = 0.2
 

@@ -69,6 +69,41 @@ pause={
 "events": [Object(InputEventKey,"physical_keycode":4194305)
 ]
 }
+attack={
+"deadzone": 0.2,
+"events": [Object(InputEventMouseButton,"button_index":1,"pressed":true)
+]
+}
+interact={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":69)
+]
+}
+next_weapon={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":81)
+]
+}
+eat={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":49)
+]
+}
+drink={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":50)
+]
+}
+bandage={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":51)
+]
+}
+inventory={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":4194306)
+]
+}
 
 [rendering]
 

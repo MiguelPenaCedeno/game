@@ -34,6 +34,10 @@ var hand_r: Node3D
 var _phase := 0.0
 var _breath := 0.0
 var _mats := {}
+var _attack_t := 0.0
+var _attack_dur := 0.4
+var _weapon := ""
+var _gun := false
 
 
 func _ready() -> void:
@@ -138,7 +142,7 @@ func _build() -> void:
 		# cejas
 		_part(head, _box(Vector3(0.05, 0.012, 0.02)), hair, Vector3(0.045 * s, 0.15, -0.105), Vector3.ONE, Vector3(0, 0, -0.15 * s))
 	# pelo: casquete con algo de volumen atrás
-	if not zombie or randf() < 0.6:
+	if not zombie or hair.r < 0.33:
 		_part(head, _sphere(0.125), hair, Vector3(0, 0.145, 0.015), Vector3(0.95, 0.75, 1.02))
 		_part(head, _sphere(0.11), hair, Vector3(0, 0.1, 0.045), Vector3(0.98, 0.9, 0.85))
 
@@ -174,6 +178,32 @@ func _build() -> void:
 
 	for mi in find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+
+## Cambia el objeto que lleva en la mano derecha.
+func set_weapon(kind: String) -> void:
+	if kind == _weapon or hand_r == null:
+		return
+	_weapon = kind
+	_gun = kind == "pistola"
+	for c in hand_r.get_children():
+		c.queue_free()
+	var wood := Color(0.55, 0.42, 0.28)
+	var metal := Color(0.55, 0.57, 0.6)
+	match kind:
+		"bate":
+			_part(hand_r, _cyl(0.05, 0.025, 0.9), wood, Vector3(0, -0.4 * cos(0.6), -0.4 * sin(0.6)), Vector3.ONE, Vector3(0.6, 0, 0))
+		"hacha":
+			_part(hand_r, _cyl(0.025, 0.025, 0.8), Color(0.38, 0.27, 0.18), Vector3(0, -0.35 * cos(0.6), -0.35 * sin(0.6)), Vector3.ONE, Vector3(0.6, 0, 0))
+			_part(hand_r, _box(Vector3(0.03, 0.14, 0.22)), metal, Vector3(0, -0.72 * cos(0.6), -0.72 * sin(0.6) - 0.06), Vector3.ONE, Vector3(0.6, 0, 0))
+		"pistola":
+			_part(hand_r, _box(Vector3(0.045, 0.24, 0.08)), Color(0.12, 0.12, 0.13), Vector3(0, -0.1, -0.02))
+			_part(hand_r, _box(Vector3(0.04, 0.07, 0.12)), Color(0.18, 0.15, 0.13), Vector3(0, 0.0, 0.05))
+
+
+func play_attack(duration: float) -> void:
+	_attack_dur = maxf(duration, 0.2)
+	_attack_t = _attack_dur
 
 
 ## speed en m/s sobre el suelo. Llamar cada frame.
@@ -228,6 +258,14 @@ func animate(delta: float, speed: float, crouching: bool, airborne := false) -> 
 		hip_r_x *= 0.55
 		arm_spread = 0.12
 
+	if _attack_t > 0.0:
+		_attack_t -= delta
+	var attacking := _attack_t > 0.0
+	if _gun and attacking:
+		# apuntar con las dos manos
+		arm_r_x = 1.55
+		arm_l_x = 1.45
+		elbow_x = 0.05
 	# respirar cuando está quieto
 	var breath := sin(_breath) * 0.015 * (1.0 - minf(amt, 1.0))
 
@@ -245,3 +283,12 @@ func animate(delta: float, speed: float, crouching: bool, airborne := false) -> 
 	shoulder_r.rotation.z = lerpf(shoulder_r.rotation.z, -arm_spread, k)
 	elbow_l.rotation.x = lerpf(elbow_l.rotation.x, elbow_x, k)
 	elbow_r.rotation.x = lerpf(elbow_r.rotation.x, elbow_x, k)
+	if attacking and not _gun:
+		# golpe: levanta el brazo y lo baja de golpe
+		var t := 1.0 - _attack_t / _attack_dur
+		var arm := lerpf(0.4, 2.8, t / 0.3) if t < 0.3 else lerpf(2.8, 0.1, minf((t - 0.3) / 0.35, 1.0))
+		shoulder_r.rotation.x = arm
+		elbow_r.rotation.x = 0.35
+		spine.rotation.y = lerpf(0.25, -0.3, clampf((t - 0.25) / 0.4, 0.0, 1.0))
+	else:
+		spine.rotation.y = lerpf(spine.rotation.y, 0.0, k)

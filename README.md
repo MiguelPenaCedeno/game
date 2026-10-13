@@ -15,7 +15,25 @@ Survival de zombis cooperativo para jugar online entre dos (o hasta cuatro) pers
 
 ### Controles
 
-WASD moverte · Ratón mirar · Shift correr · C agacharte · Espacio saltar · Esc menú
+| Tecla | Acción |
+|---|---|
+| WASD / Ratón | moverte / mirar |
+| Shift | correr (hace ruido, gasta energía) |
+| C | agacharte (sigilo: casi no haces ruido y te ven de más cerca) |
+| Espacio | saltar |
+| Clic izquierdo | golpear o disparar |
+| E | registrar muebles y maleteros |
+| Q | cambiar de arma |
+| 1 · 2 · 3 | comer · beber · vendarte |
+| Tab | mochila (ver peso y soltar cosas) |
+| Esc | menú |
+
+### Supervivencia
+
+- **Salud, energía, hambre y sed** como en la versión web. Los arañazos te hacen sangrar (véndate) y alguna mordida te infecta.
+- **Peso:** cada objeto pesa (lata 0,4 kg, botella 0,5 kg, hacha 2,2 kg…). Hasta 8 kg vas normal; a partir de ahí cada vez más lento, por encima de 14 kg no puedes correr y con 20 kg ya no cabe nada más: lo que sobra se queda en el mueble. Con Tab puedes soltar cosas (si estás junto a un mueble, se quedan dentro).
+- **Zombis:** los controla el anfitrión. Oyen el ruido que haces (andar, correr, golpear y sobre todo disparar) y ven lo que tienen delante; agachado es más difícil que te vean. Esquivan paredes y entran por las puertas.
+- **Minimapa** arriba a la derecha: gira contigo. Cuadraditos amarillos = muebles sin registrar, puntos rojos = zombis cercanos, flechas de color = tus compañeros.
 
 ## Jugar online
 
@@ -62,6 +80,10 @@ godot/
   scripts/main.gd      menú, pausa y alta/baja de jugadores
   scripts/player.gd    movimiento en tercera persona
   scripts/human_figure.gd  figura humana articulada y animada por código
+  scripts/zombie.gd    IA de los zombis (solo corre en el anfitrión)
+  scripts/items.gd     objetos, pesos, armas y botín
+  scripts/hud.gd       interfaz: estadísticas, mochila, avisos, muerte
+  scripts/minimap.gd   minimapa
   scripts/world.gd     el pueblo: casas con tejado, vallas, postes, coches, árboles
   shaders/             sombreado de cómic y postproceso de tinta
   fonts/               tipografías (licencias OFL / Apache incluidas)
@@ -74,9 +96,12 @@ Cada jugador controla su propio personaje y el `MultiplayerSynchronizer` envía 
 - [x] Pueblo provisional con cajas, personaje en tercera persona
 - [x] Estilo novela gráfica (tinta, trama, papel) y figura humana animada
 - [x] Multijugador: crear partida / unirse
-- [ ] Hambre, sed, salud, sangrado, ciclo día/noche
-- [ ] Registrar muebles y coches (ya marcados en el grupo `contenedores`)
-- [ ] Inventario **con peso** y sobrecarga
-- [ ] Zombis que oyen el ruido, armas cuerpo a cuerpo y pistola
+- [x] Hambre, sed, salud, sangrado e infección
+- [x] Registrar muebles y coches (compartido en cooperativo)
+- [x] Inventario **con peso** y sobrecarga
+- [x] Zombis que oyen el ruido, armas cuerpo a cuerpo y pistola
+- [x] Minimapa
+- [ ] Ciclo día/noche con linterna
+- [ ] Sonido
 - [ ] Sustituir cajas por modelos propios (`.glb` desde fotos/IA → Blender → Godot)
 - [ ] Exportar a Windows y Android

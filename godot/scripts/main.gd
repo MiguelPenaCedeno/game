@@ -7,6 +7,11 @@ extends Node3D
 ##   godot -- --solo | --host | --join=IP   [--name=Nombre]
 
 const PLAYER_SCENE := preload("res://scenes/player.tscn")
+const ZOMBIE_SCENE := preload("res://scenes/zombie.tscn")
+const HUD_SCRIPT := preload("res://scripts/hud.gd")
+const ZOMBIE_COUNT := 26
+## los zombis nuevos aparecen al menos así de lejos de cualquier jugador
+const ZOMBIE_SPAWN_MIN_DIST := 30.0
 const INK_SHADER := preload("res://shaders/ink_post.gdshader")
 const FONT_TITLE := preload("res://fonts/SpecialElite-Regular.ttf")
 const FONT_UI := preload("res://fonts/BarlowCondensed-SemiBold.ttf")
@@ -15,6 +20,8 @@ const PAPER := Color(0.95, 0.92, 0.84)
 const ACCENT := Color(0.62, 0.06, 0.04)
 
 @onready var players: Node3D = $Players
+@onready var zombies: Node3D = $Zombies
+@onready var world: Node3D = $World
 @onready var menu_camera: Camera3D = $MenuCamera
 
 var in_game := false
@@ -25,8 +32,9 @@ var pause_panel: CenterContainer
 var name_edit: LineEdit
 var ip_edit: LineEdit
 var status_label: Label
-var hud_label: Label
-var hud_panel: PanelContainer
+var hud: Control
+var _zombie_counter := 0
+var _zombie_timer: Timer
 
 
 func _ready() -> void:
@@ -50,8 +58,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not in_game:
 		return
 	if event.is_action_pressed("pause"):
-		_set_paused(not pause_panel.visible)
-	elif event is InputEventMouseButton and event.pressed and not pause_panel.visible:
+		if hud.inventory.visible:
+			hud.toggle_inventory()
+		elif not hud.death.visible:
+			_set_paused(not pause_panel.visible)
+	elif event.is_action_pressed("inventory") and not pause_panel.visible:
+		hud.toggle_inventory()
+	elif event is InputEventMouseButton and event.pressed and not pause_panel.visible and not hud.is_blocking():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
@@ -61,6 +74,7 @@ func _on_solo_pressed() -> void:
 	Network.play_solo()
 	_start_game()
 	_add_player(1)
+	_start_zombies()
 
 
 func _on_host_pressed() -> void:
@@ -71,6 +85,7 @@ func _on_host_pressed() -> void:
 		return
 	_start_game()
 	_add_player(1)
+	_start_zombies()
 
 
 func _on_join_pressed() -> void:
@@ -95,6 +110,7 @@ func _on_leave_pressed() -> void:
 func _on_peer_connected(id: int) -> void:
 	if multiplayer.is_server():
 		_add_player(id)
+		world.send_state_to(id)
 
 
 func _on_peer_disconnected(id: int) -> void:
@@ -128,7 +144,7 @@ func _add_player(id: int) -> void:
 func _start_game() -> void:
 	in_game = true
 	menu_panel.visible = false
-	hud_panel.visible = true
+	hud.visible = true
 	status_label.text = ""
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -137,9 +153,15 @@ func _back_to_menu(message: String) -> void:
 	in_game = false
 	for p in players.get_children():
 		p.queue_free()
+	for z in zombies.get_children():
+		z.queue_free()
+	if _zombie_timer:
+		_zombie_timer.stop()
+	world.reset_containers()
 	menu_camera.current = true
 	pause_panel.visible = false
-	hud_panel.visible = false
+	hud.visible = false
+	hud.player = null
 	menu_panel.visible = true
 	status_label.text = message
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -165,8 +187,7 @@ func _update_hud() -> void:
 	else:
 		lines.append("Conectado a la partida")
 	lines.append("Jugadores: %d" % players.get_child_count())
-	lines.append("WASD moverte · Ratón mirar · Shift correr · C agacharte · Espacio saltar · Esc menú")
-	hud_label.text = "\n".join(lines)
+	hud.set_info("\n".join(lines))
 
 
 func _handle_cmdline() -> void:
@@ -245,19 +266,23 @@ func _build_ui() -> void:
 	ptitle.add_theme_font_size_override("font_size", 40)
 	ptitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pbox.add_child(ptitle)
+	var keys := Label.new()
+	keys.text = "WASD moverte · Shift correr · C agacharte · Espacio saltar\nClic golpear o disparar · E registrar · Q cambiar arma\n1 comer · 2 beber · 3 vendarte · Tab mochila"
+	keys.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pbox.add_child(keys)
 	pbox.add_child(_button("Seguir jugando", func(): _set_paused(false)))
 	pbox.add_child(_button("Salir al menú principal", _on_leave_pressed))
 
 	# HUD
-	# HUD: un "bocadillo" de narrador arriba a la izquierda, como en los cómics
-	hud_panel = PanelContainer.new()
-	hud_panel.position = Vector2(16, 14)
-	hud_panel.visible = false
-	hud_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ui_root.add_child(hud_panel)
-	hud_label = Label.new()
-	hud_label.add_theme_font_size_override("font_size", 17)
-	hud_panel.add_child(hud_label)
+	# interfaz de juego
+	hud = HUD_SCRIPT.new()
+	ui_root.add_child(hud)
+	ui_root.move_child(hud, 0)
+	hud.respawn_requested.connect(func():
+		var me := players.get_node_or_null(str(multiplayer.get_unique_id()))
+		if me:
+			me.respawn())
+	hud.leave_requested.connect(_on_leave_pressed)
 
 
 func _centered_panel() -> CenterContainer:
@@ -344,3 +369,60 @@ func _comic_box(bg: Color, border: int, shadow: int) -> StyleBoxFlat:
 	sb.content_margin_top = 6
 	sb.content_margin_bottom = 6
 	return sb
+
+
+# ------------------------------------------------------------------ zombis (solo anfitrión)
+func _start_zombies() -> void:
+	world.bake_navigation()
+	var region: NavigationRegion3D = world.get_node("Navegacion")
+	if region.is_baking():
+		await region.bake_finished
+	# espera a que el mapa de navegación incluya la malla nueva
+	var map := get_world_3d().navigation_map
+	for i in 120:
+		if NavigationServer3D.map_get_iteration_id(map) > 0 and NavigationServer3D.map_get_closest_point(map, Vector3(30, 0, 30)) != Vector3.ZERO:
+			break
+		await get_tree().physics_frame
+	if not in_game:
+		return
+	for i in ZOMBIE_COUNT:
+		_spawn_zombie()
+	if _zombie_timer == null:
+		_zombie_timer = Timer.new()
+		_zombie_timer.wait_time = 15.0
+		_zombie_timer.timeout.connect(_refill_zombies)
+		add_child(_zombie_timer)
+	_zombie_timer.start()
+
+
+func _refill_zombies() -> void:
+	if not in_game or not multiplayer.is_server():
+		return
+	var alive := 0
+	for z in zombies.get_children():
+		if not z.dead:
+			alive += 1
+	for i in mini(ZOMBIE_COUNT - alive, 3):
+		_spawn_zombie()
+
+
+func _spawn_zombie() -> void:
+	var map := get_world_3d().navigation_map
+	for attempt in 20:
+		var p := Vector3(randf_range(-62, 62), 0, randf_range(-62, 62))
+		var on_nav := NavigationServer3D.map_get_closest_point(map, p)
+		if on_nav != Vector3.ZERO:
+			p = on_nav
+		var too_close := p.distance_to(Vector3.ZERO) < ZOMBIE_SPAWN_MIN_DIST
+		for pl in players.get_children():
+			if pl.global_position.distance_to(p) < ZOMBIE_SPAWN_MIN_DIST:
+				too_close = true
+		if too_close:
+			continue
+		var z := ZOMBIE_SCENE.instantiate()
+		_zombie_counter += 1
+		z.name = "Z%d" % _zombie_counter
+		z.position = p + Vector3.UP * 0.1
+		z.rotation.y = randf() * TAU
+		zombies.add_child(z, true)
+		return

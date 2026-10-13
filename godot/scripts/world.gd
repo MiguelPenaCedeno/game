@@ -5,6 +5,9 @@ extends Node3D
 
 const TOON := preload("res://shaders/toon.gdshader")
 
+## Llega el botín de un mueble que registró el jugador local.
+signal loot_received(idx: int, loot: Dictionary)
+
 const SEED := 1993
 const HALF := 70.0
 const ROADS: Array[float] = [-40.0, 0.0, 40.0]
@@ -51,7 +54,13 @@ var rng := RandomNumberGenerator.new()
 var _materials := {}
 ## [{rect: Rect2 (planta), roof: Node3D}] para ocultar el tejado al entrar
 var houses: Array[Dictionary] = []
+## Muebles y maleteros registrables, en el mismo orden en todos los equipos:
+## {node, mesh, type, name, pos, empty} y, solo en el anfitrión, {loot, rolled}
+var containers: Array[Dictionary] = []
 var _roof_hidden: Node3D
+var _nav_region: NavigationRegion3D
+var _fx: Node3D
+var _fx_items: Array[Node3D] = []
 
 
 func _ready() -> void:
@@ -67,6 +76,146 @@ func _ready() -> void:
 	_build_trees()
 	_build_debris()
 	_build_bounds()
+	# a partir de aquí el azar ya no tiene que coincidir entre equipos
+	rng = RandomNumberGenerator.new()
+	rng.randomize()
+	_fx = Node3D.new()
+	_fx.name = "Fx"
+	add_child(_fx)
+
+
+## Malla de navegación para los zombis. Solo la necesita el anfitrión.
+func bake_navigation() -> void:
+	if _nav_region:
+		return
+	var nav := NavigationMesh.new()
+	nav.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
+	nav.geometry_source_geometry_mode = NavigationMesh.SOURCE_GEOMETRY_GROUPS_WITH_CHILDREN
+	nav.geometry_source_group_name = &"world"
+	nav.agent_radius = 0.5
+	nav.agent_height = 1.75
+	nav.agent_max_climb = 0.25
+	nav.cell_size = 0.25
+	nav.cell_height = 0.25
+	_nav_region = NavigationRegion3D.new()
+	_nav_region.name = "Navegacion"
+	_nav_region.navigation_mesh = nav
+	add_child(_nav_region)
+	_nav_region.bake_navigation_mesh(true)
+
+
+# ------------------------------------------------------------------ registrar muebles (red)
+func container_index_near(pos: Vector3, forward: Vector3, max_dist := 2.2) -> int:
+	var best := -1
+	var best_score := INF
+	for i in containers.size():
+		var c: Dictionary = containers[i]
+		var to: Vector3 = c.pos - pos
+		to.y = 0
+		var d := to.length() - (1.0 if c.type == "coche" else 0.4)
+		if d > max_dist:
+			continue
+		var facing := to.normalized().dot(forward)
+		var score := d - facing * 0.8
+		if score < best_score and _reachable(pos, c):
+			best_score = score
+			best = i
+	return best
+
+
+## Sin paredes entre el jugador y el mueble.
+func _reachable(pos: Vector3, c: Dictionary) -> bool:
+	var target: Vector3 = c.pos
+	var q := PhysicsRayQueryParameters3D.create(pos + Vector3.UP * 1.0, Vector3(target.x, pos.y + 0.6, target.z), 1)
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	return hit.is_empty() or hit.collider == c.node
+
+
+@rpc("any_peer", "call_local", "reliable")
+func request_search(idx: int) -> void:
+	if not multiplayer.is_server() or idx < 0 or idx >= containers.size():
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if sender == 0:
+		sender = 1
+	var c: Dictionary = containers[idx]
+	if not c.get("rolled", false):
+		c.loot = Items.roll_loot(c.type)
+		c.rolled = true
+	var loot: Dictionary = c.get("loot", {})
+	c.loot = {}
+	set_container_empty.rpc(idx, true)
+	receive_loot.rpc_id(sender, idx, loot)
+
+
+@rpc("authority", "call_local", "reliable")
+func receive_loot(idx: int, loot: Dictionary) -> void:
+	loot_received.emit(idx, loot)
+
+
+## Lo que no cabe en la mochila vuelve al mueble.
+@rpc("any_peer", "call_local", "reliable")
+func return_loot(idx: int, leftover: Dictionary) -> void:
+	if not multiplayer.is_server() or leftover.is_empty():
+		return
+	var c: Dictionary = containers[idx]
+	var loot: Dictionary = c.get("loot", {})
+	for k in leftover:
+		loot[k] = loot.get(k, 0) + int(leftover[k])
+	c.loot = loot
+	set_container_empty.rpc(idx, false)
+
+
+@rpc("authority", "call_local", "reliable")
+func set_container_empty(idx: int, empty: bool) -> void:
+	var c: Dictionary = containers[idx]
+	c.empty = empty
+	var mesh: MeshInstance3D = c.mesh
+	var base: Color = c.color
+	mesh.material_override = _mat(base.darkened(0.45) if empty else base, 0.2, 3.0)
+
+
+## Al unirse alguien, el anfitrión le cuenta qué muebles ya están vacíos.
+func send_state_to(peer: int) -> void:
+	var empties := PackedInt32Array()
+	for i in containers.size():
+		if containers[i].empty:
+			empties.append(i)
+	_sync_empties.rpc_id(peer, empties)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _sync_empties(empties: PackedInt32Array) -> void:
+	for i in empties:
+		set_container_empty(i, true)
+
+
+func reset_containers() -> void:
+	for i in containers.size():
+		var c: Dictionary = containers[i]
+		c.erase("loot")
+		c.erase("rolled")
+		if c.empty:
+			set_container_empty(i, false)
+
+
+func _register_container(body: Node3D, type: String, color: Color) -> void:
+	var mesh: MeshInstance3D = body.find_children("*", "MeshInstance3D", false, false)[0]
+	containers.append({
+		"node": body, "mesh": mesh, "type": type, "name": Items.CONTAINERS[type].name,
+		"pos": body.global_position, "empty": false, "color": color,
+	})
+
+
+# ------------------------------------------------------------------ efectos en tiempo real
+## Mancha de sangre (golpes, heridas). Se borran las más viejas.
+func spawn_blood(pos: Vector3, size: float) -> void:
+	var splat := Node3D.new()
+	_fx.add_child(splat)
+	_blood(pos, size, splat)
+	_fx_items.append(splat)
+	while _fx_items.size() > 240:
+		_fx_items.pop_front().queue_free()
 
 
 ## Oculta el tejado de la casa en la que está el jugador local.
@@ -189,8 +338,10 @@ func _build_house(cx: float, cz: float, w: float, d: float, door_side: String) -
 	_wall_x(house, x1, x2, z2, color, door_side == "S", 1.0)
 	_wall_z(house, z1, z2, x1, color, door_side == "W", -1.0)
 	_wall_z(house, z1, z2, x2, color, door_side == "E", 1.0)
-	# tabique interior con hueco de puerta
-	_wall_z(house, z1, z2, cx + rng.randf_range(-1.0, 1.0), color.darkened(0.08), true, 0.0)
+	# tabique interior con hueco de puerta, apartado de la puerta principal
+	var side := 1.0 if rng.randf() < 0.5 else -1.0
+	var px := cx + side * w * rng.randf_range(0.2, 0.26)
+	_wall_z(house, z1, z2, px, color.darkened(0.08), true, 0.0)
 	# escalón y puerta abierta
 	var front := 1.0 if door_side == "S" else -1.0
 	var door_z := z2 if door_side == "S" else z1
@@ -205,14 +356,15 @@ func _build_house(cx: float, cz: float, w: float, d: float, door_side: String) -
 	var back_z := z1 + 0.5 if door_side == "S" else z2 - 0.5
 	var slots := [x1 + 1.2, cx - 1.8, cx + 1.8, x2 - 1.2]
 	for sx in slots:
-		if rng.randf() < 0.8:
+		if absf(sx - px) < 1.15:
+			continue
+		if rng.randf() < 0.85:
 			var f: Array = FURNITURE[rng.randi() % FURNITURE.size()]
 			var size: Vector3 = f[1]
 			var body := _box(Vector3(sx, size.y / 2, back_z), size, f[2], true, house, 0.2, 3.0)
-			body.add_to_group("contenedores")
-			body.set_meta("tipo", f[0])
-	# mesa y sillas en una mitad
-	var tx := cx + (w / 4) * (1.0 if rng.randf() < 0.5 else -1.0)
+			_register_container(body, f[0], f[2])
+	# mesa y sillas en la habitación grande
+	var tx := cx - side * w * 0.12
 	_box(Vector3(tx, 0.75, cz), Vector3(1.4, 0.06, 0.9), C_WOOD, true, house)
 	for lx in [-0.6, 0.6]:
 		for lz in [-0.38, 0.38]:
@@ -396,9 +548,8 @@ func _build_car(pos: Vector3, along_x: bool, color: Color) -> void:
 	car.position = pos
 	car.rotation.y = (0.0 if along_x else PI / 2) + rng.randf_range(-0.3, 0.3)
 	add_child(car)
-	var body := _box(Vector3(0, 0.62, 0), Vector3(4.2, 0.62, 1.8), color, true, car, 0.3, 2.0)
-	body.add_to_group("contenedores")
-	body.set_meta("tipo", "coche")
+	var body := _box(Vector3(0, 0.62, 0), Vector3(4.2, 0.62, 1.8), color, true, car, 0.2, 3.0)
+	_register_container(body, "coche", color)
 	# cabina con ventanillas oscuras y techo
 	_box(Vector3(-0.25, 1.17, 0), Vector3(2.1, 0.5, 1.62), C_GLASS, false, car, 0.0)
 	_box(Vector3(-0.25, 1.44, 0), Vector3(2.0, 0.06, 1.66), color, false, car)
@@ -590,8 +741,8 @@ func _sphere_mesh(pos: Vector3, r: float, color: Color) -> MeshInstance3D:
 
 
 ## Mancha plana en el suelo (tierra, charcos).
-func _disc(pos: Vector3, r: float, color: Color, squash: float) -> MeshInstance3D:
-	var mi := _cyl_mesh(pos, r, r, 0.008, color)
+func _disc(pos: Vector3, r: float, color: Color, squash: float, parent: Node3D = self) -> MeshInstance3D:
+	var mi := _cyl_mesh(pos, r, r, 0.008, color, parent)
 	mi.scale = Vector3(1, 1, squash)
 	mi.rotation.y = rng.randf_range(0, PI)
 	mi.material_override = _mat(color, 0.6, 1.2)
@@ -600,17 +751,17 @@ func _disc(pos: Vector3, r: float, color: Color, squash: float) -> MeshInstance3
 
 
 ## Salpicadura de sangre: una mancha grande y gotas alrededor. El único rojo vivo del pueblo.
-func _blood(pos: Vector3, size: float) -> void:
+func _blood(pos: Vector3, size: float, parent: Node3D = self) -> void:
 	var y := 0.07
-	_disc(Vector3(pos.x, y, pos.z), 0.55 * size, C_BLOOD, rng.randf_range(0.5, 0.9))
+	_disc(Vector3(pos.x, y, pos.z), 0.55 * size, C_BLOOD, rng.randf_range(0.5, 0.9), parent)
 	for i in rng.randi_range(3, 7):
 		var a := rng.randf_range(0, TAU)
 		var d := rng.randf_range(0.5, 1.4) * size
-		_disc(Vector3(pos.x + cos(a) * d, y + 0.001, pos.z + sin(a) * d), rng.randf_range(0.06, 0.18) * size, C_BLOOD, rng.randf_range(0.6, 1.0))
+		_disc(Vector3(pos.x + cos(a) * d, y + 0.001, pos.z + sin(a) * d), rng.randf_range(0.06, 0.18) * size, C_BLOOD, rng.randf_range(0.6, 1.0), parent)
 	# rastro de arrastre
-	if rng.randf() < 0.5:
+	if size >= 0.6 and rng.randf() < 0.5:
 		var a := rng.randf_range(0, TAU)
-		var trail := _box(Vector3(pos.x + cos(a) * size, y, pos.z + sin(a) * size), Vector3(0.35 * size, 0.008, 2.0 * size), C_BLOOD, false, self, 0.7, 2.0)
+		var trail := _box(Vector3(pos.x + cos(a) * size, y, pos.z + sin(a) * size), Vector3(0.35 * size, 0.008, 2.0 * size), C_BLOOD, false, parent, 0.7, 2.0)
 		trail.rotation.y = -a + PI / 2
 		(trail as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
