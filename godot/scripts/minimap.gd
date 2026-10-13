@@ -56,6 +56,15 @@ func _draw() -> void:
 	# muebles y maleteros
 	for ct in world.containers:
 		var p: Vector2 = to_map.call(ct.pos.x, ct.pos.z)
+		if ct.type == "mochila":
+			if ct.empty:
+				continue
+			# mochila de un cadáver: siempre visible, en el borde si está lejos
+			if ct.corpse:
+				p = p.clamp(Vector2(7, 7), size - Vector2(7, 7))
+			draw_rect(Rect2(p - Vector2(4, 4), Vector2(8, 8)), ZOMBIE if ct.corpse else Color(0.98, 0.86, 0.55))
+			draw_rect(Rect2(p - Vector2(4, 4), Vector2(8, 8)), INK, false, 1.5)
+			continue
 		if ct.empty:
 			draw_rect(Rect2(p - Vector2(2.5, 2.5), Vector2(5, 5)), Color(INK, 0.35), false, 1.0)
 		else:

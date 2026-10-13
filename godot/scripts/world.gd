@@ -5,8 +5,12 @@ extends Node3D
 
 const TOON := preload("res://shaders/toon.gdshader")
 
-## Llega el botín de un mueble que registró el jugador local.
-signal loot_received(idx: int, loot: Dictionary)
+## Abriste un mueble: esto es lo que tiene.
+signal container_opened(idx: int, loot: Dictionary)
+## El mueble que tienes abierto cambió (alguien cogió o dejó algo).
+signal container_changed(idx: int, loot: Dictionary)
+## El anfitrión te da lo que pediste coger.
+signal item_granted(idx: int, item: String, n: int)
 
 const SEED := 1993
 const HALF := 70.0
@@ -61,6 +65,9 @@ var _roof_hidden: Node3D
 var _nav_region: NavigationRegion3D
 var _fx: Node3D
 var _fx_items: Array[Node3D] = []
+var _bags: Node3D
+## cuántos muebles vienen del mapa; los de después son bultos y mochilas
+var _static_count := 0
 
 
 func _ready() -> void:
@@ -83,6 +90,10 @@ func _ready() -> void:
 	_fx = Node3D.new()
 	_fx.name = "Fx"
 	add_child(_fx)
+	_bags = Node3D.new()
+	_bags.name = "Bultos"
+	add_child(_bags)
+	_static_count = containers.size()
 
 
 ## Malla de navegación para los zombis. Solo la necesita el anfitrión.
@@ -111,6 +122,8 @@ func container_index_near(pos: Vector3, forward: Vector3, max_dist := 2.2) -> in
 	var best_score := INF
 	for i in containers.size():
 		var c: Dictionary = containers[i]
+		if c.type == "mochila" and c.empty:
+			continue
 		var to: Vector3 = c.pos - pos
 		to.y = 0
 		var d := to.length() - (1.0 if c.type == "coche" else 0.4)
@@ -132,70 +145,232 @@ func _reachable(pos: Vector3, c: Dictionary) -> bool:
 	return hit.is_empty() or hit.collider == c.node
 
 
+# Modelo: el contenido de cada mueble vive en el anfitrión. Al abrirlo, quien
+# lo abre recibe la lista y queda "mirando"; cada vez que alguien coge o deja
+# algo, el anfitrión manda la lista nueva a todos los que lo miran.
+
 @rpc("any_peer", "call_local", "reliable")
-func request_search(idx: int) -> void:
+func request_open(idx: int) -> void:
 	if not multiplayer.is_server() or idx < 0 or idx >= containers.size():
 		return
-	var sender := multiplayer.get_remote_sender_id()
-	if sender == 0:
-		sender = 1
+	var sender := _sender()
 	var c: Dictionary = containers[idx]
-	if not c.get("rolled", false):
-		c.loot = Items.roll_loot(c.type)
-		c.rolled = true
-	var loot: Dictionary = c.get("loot", {})
-	c.loot = {}
-	set_container_empty.rpc(idx, true)
-	receive_loot.rpc_id(sender, idx, loot)
+	_ensure_rolled(c)
+	var viewers: Array = c.get("viewers", [])
+	if sender not in viewers:
+		viewers.append(sender)
+	c.viewers = viewers
+	_container_contents.rpc_id(sender, idx, c.loot.duplicate(), true)
+	_update_empty(idx)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func request_close(idx: int) -> void:
+	if not multiplayer.is_server() or idx < 0 or idx >= containers.size():
+		return
+	var viewers: Array = containers[idx].get("viewers", [])
+	viewers.erase(_sender())
+
+
+@rpc("any_peer", "call_local", "reliable")
+func request_take(idx: int, item: String, n: int) -> void:
+	if not multiplayer.is_server() or idx < 0 or idx >= containers.size():
+		return
+	var c: Dictionary = containers[idx]
+	_ensure_rolled(c)
+	var got := mini(n, int(c.loot.get(item, 0)))
+	if got > 0:
+		c.loot[item] -= got
+		if c.loot[item] <= 0:
+			c.loot.erase(item)
+		_grant.rpc_id(_sender(), idx, item, got)
+	_notify(idx)
+
+
+## Dejar cosas en un mueble (o devolver lo que no cabe).
+@rpc("any_peer", "call_local", "reliable")
+func return_loot(idx: int, items: Dictionary) -> void:
+	if not multiplayer.is_server() or idx < 0 or idx >= containers.size() or items.is_empty():
+		return
+	var c: Dictionary = containers[idx]
+	_ensure_rolled(c)
+	for k in items:
+		c.loot[k] = int(c.loot.get(k, 0)) + int(items[k])
+	_notify(idx)
+
+
+## Soltar en el suelo o morir: crea un bulto (o la mochila del cadáver) con esas cosas.
+## Si ya hay un bulto al lado, se añade a ese.
+@rpc("any_peer", "call_local", "reliable")
+func request_drop(pos: Vector3, items: Dictionary, label: String, corpse: bool) -> void:
+	if not multiplayer.is_server() or items.is_empty():
+		return
+	if not corpse:
+		for i in range(_static_count, containers.size()):
+			var c: Dictionary = containers[i]
+			if not c.corpse and Vector2(c.pos.x - pos.x, c.pos.z - pos.z).length() < 1.6:
+				return_loot(i, items)
+				return
+	var idx := containers.size()
+	_add_bag.rpc(idx, pos, label, corpse)
+	var c: Dictionary = containers[idx]
+	c.loot = items.duplicate()
+	c.rolled = true
+	_update_empty(idx)
 
 
 @rpc("authority", "call_local", "reliable")
-func receive_loot(idx: int, loot: Dictionary) -> void:
-	loot_received.emit(idx, loot)
+func _container_contents(idx: int, loot: Dictionary, opened: bool) -> void:
+	if opened:
+		container_opened.emit(idx, loot)
+	else:
+		container_changed.emit(idx, loot)
 
 
-## Lo que no cabe en la mochila vuelve al mueble.
-@rpc("any_peer", "call_local", "reliable")
-func return_loot(idx: int, leftover: Dictionary) -> void:
-	if not multiplayer.is_server() or leftover.is_empty():
-		return
+@rpc("authority", "call_local", "reliable")
+func _grant(idx: int, item: String, n: int) -> void:
+	item_granted.emit(idx, item, n)
+
+
+func _notify(idx: int) -> void:
 	var c: Dictionary = containers[idx]
-	var loot: Dictionary = c.get("loot", {})
-	for k in leftover:
-		loot[k] = loot.get(k, 0) + int(leftover[k])
-	c.loot = loot
-	set_container_empty.rpc(idx, false)
+	for v in c.get("viewers", []):
+		if v == 1 or v in multiplayer.get_peers():
+			_container_contents.rpc_id(v, idx, c.loot.duplicate(), false)
+	_update_empty(idx)
+
+
+func _update_empty(idx: int) -> void:
+	var empty: bool = containers[idx].loot.is_empty()
+	if empty != containers[idx].empty:
+		set_container_empty.rpc(idx, empty)
+
+
+func _ensure_rolled(c: Dictionary) -> void:
+	if not c.get("rolled", false):
+		c.loot = Items.roll_loot(c.type)
+		c.rolled = true
+
+
+func _sender() -> int:
+	var s := multiplayer.get_remote_sender_id()
+	return s if s != 0 else 1
+
+
+## Un jugador se fue: deja de "mirar" muebles.
+func forget_peer(peer: int) -> void:
+	for c in containers:
+		c.get("viewers", []).erase(peer)
 
 
 @rpc("authority", "call_local", "reliable")
 func set_container_empty(idx: int, empty: bool) -> void:
 	var c: Dictionary = containers[idx]
 	c.empty = empty
+	if c.type == "mochila":
+		# los bultos vacíos desaparecen; si alguien deja algo, vuelven
+		c.node.visible = not empty
+		return
 	var mesh: MeshInstance3D = c.mesh
 	var base: Color = c.color
 	mesh.material_override = _mat(base.darkened(0.45) if empty else base, 0.2, 3.0)
 
 
-## Al unirse alguien, el anfitrión le cuenta qué muebles ya están vacíos.
+## Bulto en el suelo o mochila de un cadáver.
+@rpc("authority", "call_local", "reliable")
+func _add_bag(idx: int, pos: Vector3, label: String, corpse: bool) -> void:
+	if idx != containers.size():
+		push_warning("Índice de bulto desincronizado: %d vs %d" % [idx, containers.size()])
+		return
+	var body := StaticBody3D.new()
+	body.name = "Bulto%d" % idx
+	# capa propia: no choca con nada, solo sirve para identificarlo
+	body.collision_layer = 8
+	body.collision_mask = 0
+	body.position = Vector3(pos.x, 0.0, pos.z)
+	body.rotation.y = randf() * TAU
+	_bags.add_child(body)
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(0.6, 0.5, 0.45)
+	shape.shape = box
+	shape.position.y = 0.25
+	body.add_child(shape)
+	var color := Color(0.36, 0.38, 0.26) if corpse else Color(0.45, 0.38, 0.28)
+	var bag := _box(Vector3(0, 0.22, 0), Vector3(0.55, 0.42, 0.35), color, false, body, 0.2, 3.0)
+	_box(Vector3(0, 0.38, 0.05), Vector3(0.5, 0.12, 0.3), color.darkened(0.25), false, body, 0.2, 3.0)
+	if corpse:
+		_blood(body.position, 1.2, body)
+	containers.append({
+		"node": body, "mesh": bag, "type": "mochila", "name": label,
+		"pos": body.global_position, "empty": false, "color": color, "corpse": corpse,
+	})
+
+
+## Al unirse alguien, el anfitrión le pasa los bultos que hay y qué muebles están vacíos.
 func send_state_to(peer: int) -> void:
+	var bags := []
+	for i in range(_static_count, containers.size()):
+		var c: Dictionary = containers[i]
+		bags.append([i, c.pos, c.name, c.corpse])
 	var empties := PackedInt32Array()
 	for i in containers.size():
 		if containers[i].empty:
 			empties.append(i)
-	_sync_empties.rpc_id(peer, empties)
+	_sync_state.rpc_id(peer, bags, empties)
 
 
 @rpc("authority", "call_remote", "reliable")
-func _sync_empties(empties: PackedInt32Array) -> void:
+func _sync_state(bags: Array, empties: PackedInt32Array) -> void:
+	for b in bags:
+		if b[0] == containers.size():
+			_add_bag(b[0], b[1], b[2], b[3])
 	for i in empties:
 		set_container_empty(i, true)
 
 
+## Estado del mundo para el guardado (solo en el anfitrión).
+func export_state() -> Dictionary:
+	var conts := {}
+	for i in _static_count:
+		var c: Dictionary = containers[i]
+		if c.get("rolled", false):
+			conts[i] = c.loot.duplicate()
+	var bags := []
+	for i in range(_static_count, containers.size()):
+		var c: Dictionary = containers[i]
+		if not c.loot.is_empty():
+			bags.append({"pos": c.pos, "name": c.name, "corpse": c.corpse, "loot": c.loot.duplicate()})
+	return {"containers": conts, "bags": bags}
+
+
+func import_state(d: Dictionary) -> void:
+	reset_containers()
+	var conts: Dictionary = d.get("containers", {})
+	for i in conts:
+		if i < _static_count:
+			var c: Dictionary = containers[i]
+			c.loot = conts[i]
+			c.rolled = true
+			if c.loot.is_empty():
+				set_container_empty(i, true)
+	for b in d.get("bags", []):
+		var idx := containers.size()
+		_add_bag(idx, b.pos, b.name, b.corpse)
+		containers[idx].loot = b.loot
+		containers[idx].rolled = true
+
+
 func reset_containers() -> void:
+	for c in containers.slice(_static_count):
+		c.node.queue_free()
+	containers.resize(_static_count)
 	for i in containers.size():
 		var c: Dictionary = containers[i]
 		c.erase("loot")
 		c.erase("rolled")
+		c.erase("viewers")
+		c.erase("seen")
 		if c.empty:
 			set_container_empty(i, false)
 
@@ -205,7 +380,7 @@ func _register_container(body: Node3D, type: String, color: Color) -> void:
 	var mesh: MeshInstance3D = body.find_children("*", "MeshInstance3D", false, false)[0]
 	containers.append({
 		"node": body, "mesh": mesh, "type": type, "name": Items.CONTAINERS[type].name,
-		"pos": body.global_position, "empty": false, "color": color,
+		"pos": body.global_position, "empty": false, "color": color, "corpse": false,
 	})
 
 

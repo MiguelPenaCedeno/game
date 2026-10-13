@@ -117,9 +117,10 @@ func _ready() -> void:
 		camera.current = true
 		spring_arm.add_excluded_object(get_rid())
 		pivot.rotation.x = pitch
-		_world.loot_received.connect(_on_loot_received)
+		_world.item_granted.connect(_on_item_granted)
 		_recalc_weight()
 		get_tree().call_group("hud", "bind_player", self)
+		try_load.call_deferred()
 	else:
 		set_physics_process(false)
 		set_process_unhandled_input(false)
@@ -244,8 +245,11 @@ func _physics_process(delta: float) -> void:
 			search = {}
 			message.emit("Dejas de registrar.", false)
 		elif search.t >= search.dur:
-			_world.request_search.rpc_id(1, search.idx)
-			searched += 1
+			var c: Dictionary = _world.containers[search.idx]
+			if not c.get("seen", false):
+				searched += 1
+			c.seen = true
+			_world.request_open.rpc_id(1, search.idx)
 			search = {}
 
 	_hurt_flash = maxf(0.0, _hurt_flash - delta)
@@ -329,74 +333,73 @@ func use_item(k: String) -> void:
 	_recalc_weight()
 
 
-## Suelta una unidad: si estás junto a un mueble la dejas dentro, si no, en el suelo.
-func drop_item(k: String) -> void:
-	if dead:
-		return
-	var label: String = Items.ITEMS[k].name
-	if owned.has(k):
+## Quita `n` unidades de la mochila (un arma cuenta como 1). Devuelve cuántas quitó.
+func _remove_item(k: String, n: int) -> int:
+	var removed := 0
+	if owned.has(k) and k != "puños":
 		owned.erase(k)
 		if weapon == k:
 			weapon = "puños"
+		removed = 1
 	elif inv.get(k, 0) > 0:
-		inv[k] -= 1
-	else:
-		return
+		removed = mini(n, inv[k])
+		inv[k] -= removed
 	_recalc_weight()
-	if interact_idx >= 0:
-		_world.return_loot.rpc_id(1, interact_idx, {k: 1})
-		message.emit("Dejas %s en %s." % [label.to_lower(), _world.containers[interact_idx].name.to_lower()], false)
-	else:
-		message.emit("Tiras %s al suelo." % label.to_lower(), false)
+	return removed
+
+
+## Cuántas unidades de `k` te caben ahora mismo.
+func fit_count(k: String, n: int) -> int:
+	if Items.WEAPONS.has(k):
+		return 1 if owned.has(k) or weight + Items.kg(k) <= Items.CARRY_MAX + 0.001 else 0
+	return clampi(int(floor((Items.CARRY_MAX - weight) / Items.kg(k) + 0.001)), 0, n)
+
+
+## Pide coger del mueble abierto lo que te quepa.
+func take(idx: int, k: String, n: int) -> void:
+	var fit := fit_count(k, n)
+	if fit <= 0:
+		message.emit("No te cabe en la mochila: %s." % Items.ITEMS[k].name.to_lower(), true)
+		return
+	_world.request_take.rpc_id(1, idx, k, fit)
+
+
+## Deja cosas en el mueble abierto.
+func put(idx: int, k: String, n: int) -> void:
+	var removed := _remove_item(k, n)
+	if removed > 0:
+		_world.return_loot.rpc_id(1, idx, {k: removed})
+
+
+## Suelta una unidad en el suelo (queda un bulto que se puede recoger).
+func drop_item(k: String) -> void:
+	if dead:
+		return
+	var removed := _remove_item(k, 1)
+	if removed > 0:
+		_world.request_drop.rpc_id(1, global_position - global_transform.basis.z * 0.6, {k: removed}, "Bulto en el suelo", false)
+		message.emit("Sueltas %s en el suelo." % Items.ITEMS[k].name.to_lower(), false)
 
 
 func _start_search() -> void:
 	if not search.is_empty() or interact_idx < 0:
 		return
 	var c: Dictionary = _world.containers[interact_idx]
-	if c.empty:
-		message.emit("%s: ya está vacío." % c.name, false)
-		return
-	search = {"idx": interact_idx, "t": 0.0, "dur": Items.CONTAINERS[c.type].time, "pos": global_position}
+	# la primera vez se registra; después se abre al momento
+	var dur: float = 0.25 if c.get("seen", false) else Items.CONTAINERS[c.type].time
+	search = {"idx": interact_idx, "t": 0.0, "dur": dur, "pos": global_position}
 	_noise_spike = 3.0
 
 
-func _on_loot_received(idx: int, loot: Dictionary) -> void:
-	var cname: String = _world.containers[idx].name
-	var got := {}
-	var leftover := {}
-	# la pistola trae su cargador
-	if loot.has("pistola"):
-		loot["balas"] = loot.get("balas", 0) + 6
-	for k in loot:
-		var n: int = loot[k]
-		if Items.WEAPONS.has(k):
-			if owned.has(k):
-				owned[k] = Items.WEAPONS[k].dur  # cambias la vieja por esta
-				got[k] = 1
-			elif weight + Items.kg(k) <= Items.CARRY_MAX:
-				owned[k] = Items.WEAPONS[k].dur
-				got[k] = 1
-				if Items.WEAPON_ORDER.find(k) > Items.WEAPON_ORDER.find(weapon) and k != "pistola":
-					weapon = k
-			else:
-				leftover[k] = 1
-		else:
-			var fit := mini(n, int(floor((Items.CARRY_MAX - weight) / Items.kg(k) + 0.001)))
-			fit = maxi(fit, 0)
-			if fit > 0:
-				inv[k] += fit
-				got[k] = fit
-			if n - fit > 0:
-				leftover[k] = n - fit
-		_recalc_weight()
-	if got.is_empty() and leftover.is_empty():
-		message.emit("%s: nada útil." % cname, false)
-	elif not got.is_empty():
-		message.emit("%s: %s." % [cname, Items.describe(got)], false)
-	if not leftover.is_empty():
-		_world.return_loot.rpc_id(1, idx, leftover)
-		message.emit("No te cabe en la mochila: %s. Lo dejas ahí." % Items.describe(leftover), true)
+## El anfitrión te da algo que pediste coger.
+func _on_item_granted(_idx: int, k: String, n: int) -> void:
+	if Items.WEAPONS.has(k):
+		owned[k] = Items.WEAPONS[k].dur  # si ya tenías una, cambias la vieja por esta
+		if Items.WEAPON_ORDER.find(k) > Items.WEAPON_ORDER.find(weapon) and k != "pistola":
+			weapon = k
+	else:
+		inv[k] = inv.get(k, 0) + n
+	_recalc_weight()
 
 
 # ------------------------------------------------------------------ armas
@@ -519,6 +522,20 @@ func _die(cause: String) -> void:
 	dead = true
 	search = {}
 	crouching = false
+	# la mochila se queda junto al cadáver; puedes volver a por ella
+	var items := {}
+	for k in inv:
+		if inv[k] > 0:
+			items[k] = inv[k]
+	for k in owned:
+		if k != "puños":
+			items[k] = 1
+	if not items.is_empty():
+		_world.request_drop.rpc_id(1, global_position, items, "Mochila de %s" % display_name, true)
+	inv = {"comida": 0, "agua": 0, "vendas": 0, "balas": 0}
+	owned = {"puños": -1}
+	weapon = "puños"
+	_recalc_weight()
 	died.emit(cause)
 
 
@@ -539,6 +556,51 @@ func respawn() -> void:
 	position = SPAWN_POINT + Vector3(randf_range(-2, 2), 0.5, 0)
 	velocity = Vector3.ZERO
 	dead = false
+
+
+# ------------------------------------------------------------------ guardado
+var _loaded := false
+
+
+func export_state() -> Dictionary:
+	return {
+		"pos": global_position, "yaw": rotation.y, "dead": dead,
+		"hp": hp, "stamina": stamina, "hunger": hunger, "thirst": thirst,
+		"bleeding": bleeding, "infected": infected,
+		"inv": inv.duplicate(), "owned": owned.duplicate(), "weapon": weapon,
+		"kills": kills, "searched": searched, "alive_time": alive_time,
+	}
+
+
+## Recupera tu personaje si esta partida ya la habías jugado.
+func try_load() -> void:
+	if _loaded or not is_multiplayer_authority() or Network.world_id.is_empty():
+		return
+	_loaded = true
+	var d := SaveGame.load_character(Network.world_id, Network.player_name)
+	if d.is_empty() or d.get("dead", false):
+		return  # nuevo, o habías muerto: tu mochila te espera en el cadáver
+	global_position = d.pos
+	rotation.y = d.yaw
+	hp = d.hp
+	stamina = d.stamina
+	hunger = d.hunger
+	thirst = d.thirst
+	bleeding = d.bleeding
+	infected = d.infected
+	inv = d.inv
+	owned = d.owned
+	weapon = d.weapon
+	kills = d.kills
+	searched = d.searched
+	alive_time = d.alive_time
+	_recalc_weight()
+	message.emit("Continúas donde lo dejaste.", false)
+
+
+func save_state() -> void:
+	if is_multiplayer_authority() and _loaded:
+		SaveGame.save_character(Network.world_id, Network.player_name, export_state())
 
 
 func hurt_flash() -> float:

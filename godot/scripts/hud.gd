@@ -32,6 +32,12 @@ var minimap: Control
 var inventory: PanelContainer
 var inv_list: VBoxContainer
 var inv_summary: Label
+var cont_box: VBoxContainer
+var cont_title: Label
+var cont_list: VBoxContainer
+## mueble abierto (-1 si solo miras la mochila) y lo que tiene
+var cont_idx := -1
+var cont_loot := {}
 var death: CenterContainer
 var death_cause: Label
 var death_stats: Label
@@ -52,6 +58,12 @@ func bind_player(p: Node3D) -> void:
 	minimap.world = world
 	p.message.connect(toast)
 	p.died.connect(_on_died)
+	if not world.container_opened.is_connected(open_container):
+		world.container_opened.connect(open_container)
+		world.container_changed.connect(_on_container_changed)
+		world.item_granted.connect(func(_i, _k, _n):
+			if inventory.visible:
+				_refresh_inventory.call_deferred())
 	death.visible = false
 	inventory.visible = false
 
@@ -67,10 +79,43 @@ func is_blocking() -> bool:
 func toggle_inventory() -> void:
 	if player == null or player.dead:
 		return
-	inventory.visible = not inventory.visible
 	if inventory.visible:
+		close_panel()
+		return
+	cont_idx = -1
+	inventory.visible = true
+	_refresh_inventory()
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## Se abrió un mueble: mochila a la derecha, mueble a la izquierda.
+func open_container(idx: int, loot: Dictionary) -> void:
+	if player == null or player.dead:
+		return
+	cont_idx = idx
+	cont_loot = loot
+	inventory.visible = true
+	_refresh_inventory()
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func close_panel() -> void:
+	if cont_idx >= 0:
+		world.request_close.rpc_id(1, cont_idx)
+	cont_idx = -1
+	inventory.visible = false
+	if player and not player.dead:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func is_container_open() -> bool:
+	return inventory.visible and cont_idx >= 0
+
+
+func _on_container_changed(idx: int, loot: Dictionary) -> void:
+	if idx == cont_idx:
+		cont_loot = loot
 		_refresh_inventory()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if inventory.visible else Input.MOUSE_MODE_CAPTURED
 
 
 func toast(text: String, bad := false) -> void:
@@ -152,14 +197,25 @@ func _process(_delta: float) -> void:
 
 	hurt.color.a = 0.0 if player.dead else minf(0.3, player.hurt_flash()) + (0.1 if player.hp < 25 else 0.0)
 
-	if inventory.visible and Engine.get_process_frames() % 10 == 0:
-		_refresh_inventory()
+	if is_container_open():
+		# te alejaste del mueble: se cierra
+		var c: Dictionary = world.containers[cont_idx]
+		var to: Vector3 = c.pos - player.global_position
+		to.y = 0
+		if to.length() > 3.2 or player.dead:
+			close_panel()
 
 
 # ------------------------------------------------------------------ inventario
 func _refresh_inventory() -> void:
 	for c in inv_list.get_children():
 		c.queue_free()
+	for c in cont_list.get_children():
+		c.queue_free()
+	var open := cont_idx >= 0
+	cont_box.visible = open
+
+	# mochila
 	var rows := []
 	for k in player.owned:
 		if k != "puños":
@@ -168,41 +224,89 @@ func _refresh_inventory() -> void:
 		if player.inv[k] > 0:
 			rows.append([k, player.inv[k]])
 	if rows.is_empty():
-		var empty := Label.new()
-		empty.text = "La mochila está vacía. Registra muebles y maleteros con E."
-		inv_list.add_child(empty)
+		inv_list.add_child(_note("La mochila está vacía."))
 	for r in rows:
 		var k: String = r[0]
 		var n: int = r[1]
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 12)
-		var name_l := Label.new()
-		name_l.text = Items.ITEMS[k].name + ("  ×%d" % n if n > 1 else "")
-		name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(name_l)
-		var kg_l := Label.new()
-		kg_l.text = "%.2f kg" % (Items.kg(k) * n)
-		kg_l.custom_minimum_size.x = 80
-		kg_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		row.add_child(kg_l)
-		var b := Button.new()
-		b.text = "Soltar 1"
-		b.pressed.connect(func(): player.drop_item(k); _refresh_inventory())
-		row.add_child(b)
-		inv_list.add_child(row)
+		if open:
+			var idx := cont_idx
+			inv_list.add_child(_item_row(k, n, [
+				["Dejar 1", func(): player.put(idx, k, 1)],
+				["Todo", func(): player.put(idx, k, n)]]))
+		else:
+			inv_list.add_child(_item_row(k, n, [["Soltar 1", func(): player.drop_item(k); _refresh_inventory()]]))
+
+	# mueble
+	if open:
+		var c: Dictionary = world.containers[cont_idx]
+		cont_title.text = c.name.to_upper()
+		if cont_loot.is_empty():
+			cont_list.add_child(_note("Vacío. Puedes dejar cosas aquí."))
+		var idx := cont_idx
+		for k in cont_loot:
+			var n: int = cont_loot[k]
+			cont_list.add_child(_item_row(k, n, [
+				["Coger 1", func(): player.take(idx, k, 1)],
+				["Todo", func(): player.take(idx, k, n)]]))
+
 	var f := Items.speed_factor(player.weight)
-	var where := ""
-	if player.interact_idx >= 0:
-		where = "\nLo que sueltes irá a: %s." % world.containers[player.interact_idx].name.to_lower()
-	inv_summary.text = "Carga: %.1f kg de %d · Velocidad: %d%%%s%s" % [
+	inv_summary.text = "Carga: %.1f kg de %d · Velocidad: %d%%%s" % [
 		player.weight, int(Items.CARRY_MAX), roundi(f * 100),
-		"\nCon más de %d kg no puedes correr." % int(Items.CARRY_HEAVY) if player.weight > Items.CARRY_LIGHT else "",
-		where]
+		"\nCon más de %d kg no puedes correr." % int(Items.CARRY_HEAVY) if player.weight > Items.CARRY_LIGHT else ""]
+
+
+func _take_all() -> void:
+	if cont_idx < 0:
+		return
+	# pide cada cosa calculando el peso como si ya la llevaras
+	var w: float = player.weight
+	for k in cont_loot.duplicate():
+		var n: int = cont_loot[k]
+		var fit := 0
+		if Items.WEAPONS.has(k):
+			fit = 1 if player.owned.has(k) or w + Items.kg(k) <= Items.CARRY_MAX + 0.001 else 0
+		else:
+			fit = clampi(int(floor((Items.CARRY_MAX - w) / Items.kg(k) + 0.001)), 0, n)
+		if fit > 0:
+			w += Items.kg(k) * fit
+			world.request_take.rpc_id(1, cont_idx, k, fit)
+	if w < player.weight + 0.001 and not cont_loot.is_empty():
+		toast("No te cabe nada más en la mochila.", true)
+
+
+func _item_row(k: String, n: int, buttons: Array) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var name_l := Label.new()
+	name_l.text = Items.ITEMS[k].name + ("  ×%d" % n if n > 1 else "")
+	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_l.custom_minimum_size.x = 150
+	row.add_child(name_l)
+	var kg_l := Label.new()
+	kg_l.text = "%.2f kg" % (Items.kg(k) * n)
+	kg_l.custom_minimum_size.x = 64
+	kg_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	kg_l.add_theme_color_override("font_color", Color(INK, 0.6))
+	row.add_child(kg_l)
+	for b in buttons:
+		var btn := Button.new()
+		btn.text = b[0]
+		btn.add_theme_font_size_override("font_size", 17)
+		btn.pressed.connect(b[1])
+		row.add_child(btn)
+	return row
+
+
+func _note(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_color_override("font_color", Color(INK, 0.6))
+	return l
 
 
 # ------------------------------------------------------------------ muerte
 func _on_died(cause: String) -> void:
-	inventory.visible = false
+	close_panel()
 	var t := int(player.alive_time)
 	death_cause.text = cause
 	death_stats.text = "Sobreviviste %d:%02d · %d zombis abatidos · %d muebles registrados" % [t / 60, t % 60, player.kills, player.searched]
@@ -349,26 +453,49 @@ func _build_inventory() -> void:
 	add_child(center)
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	inventory = PanelContainer.new()
-	inventory.custom_minimum_size = Vector2(480, 0)
 	inventory.visible = false
 	center.add_child(inventory)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 10)
-	inventory.add_child(box)
+	var outer := VBoxContainer.new()
+	outer.add_theme_constant_override("separation", 10)
+	inventory.add_child(outer)
+	var cols := HBoxContainer.new()
+	cols.add_theme_constant_override("separation", 28)
+	outer.add_child(cols)
+
+	cont_box = VBoxContainer.new()
+	cont_box.add_theme_constant_override("separation", 8)
+	cont_box.custom_minimum_size.x = 420
+	cols.add_child(cont_box)
+	cont_title = Label.new()
+	cont_title.add_theme_font_override("font", FONT_TITLE)
+	cont_title.add_theme_font_size_override("font_size", 30)
+	cont_box.add_child(cont_title)
+	cont_list = VBoxContainer.new()
+	cont_box.add_child(cont_list)
+	var take_all := Button.new()
+	take_all.text = "Coger todo lo que quepa"
+	take_all.pressed.connect(_take_all)
+	cont_box.add_child(take_all)
+
+	var inv_box := VBoxContainer.new()
+	inv_box.add_theme_constant_override("separation", 8)
+	inv_box.custom_minimum_size.x = 420
+	cols.add_child(inv_box)
 	var title := Label.new()
 	title.text = "MOCHILA"
 	title.add_theme_font_override("font", FONT_TITLE)
-	title.add_theme_font_size_override("font_size", 34)
-	box.add_child(title)
+	title.add_theme_font_size_override("font_size", 30)
+	inv_box.add_child(title)
 	inv_list = VBoxContainer.new()
-	box.add_child(inv_list)
+	inv_box.add_child(inv_list)
+
 	inv_summary = Label.new()
 	inv_summary.add_theme_color_override("font_color", Color(INK, 0.75))
-	box.add_child(inv_summary)
+	outer.add_child(inv_summary)
 	var close := Button.new()
-	close.text = "Cerrar (Tab)"
-	close.pressed.connect(toggle_inventory)
-	box.add_child(close)
+	close.text = "Cerrar (Tab / E)"
+	close.pressed.connect(close_panel)
+	outer.add_child(close)
 
 
 func _build_death() -> void:

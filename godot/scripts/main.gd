@@ -33,6 +33,9 @@ var name_edit: LineEdit
 var ip_edit: LineEdit
 var status_label: Label
 var hud: Control
+var new_game_check: CheckBox
+var save_label: Label
+var _autosave: Timer
 var _zombie_counter := 0
 var _zombie_timer: Timer
 
@@ -63,11 +66,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("pause"):
 		if hud.inventory.visible:
-			hud.toggle_inventory()
+			hud.close_panel()
 		elif not hud.death.visible:
 			_set_paused(not pause_panel.visible)
 	elif event.is_action_pressed("inventory") and not pause_panel.visible:
 		hud.toggle_inventory()
+	elif event.is_action_pressed("interact") and hud.inventory.visible:
+		hud.close_panel()
 	elif event is InputEventMouseButton and event.pressed and not pause_panel.visible and not hud.is_blocking():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -76,6 +81,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_solo_pressed() -> void:
 	Network.player_name = _chosen_name()
 	Network.play_solo()
+	_prepare_world()
 	_start_game()
 	_add_player(1)
 	_start_zombies()
@@ -87,6 +93,7 @@ func _on_host_pressed() -> void:
 	if err != OK:
 		status_label.text = "No se pudo crear la partida (¿el puerto %d está ocupado?)." % Network.PORT
 		return
+	_prepare_world()
 	_start_game()
 	_add_player(1)
 	_start_zombies()
@@ -106,6 +113,7 @@ func _on_join_pressed() -> void:
 
 
 func _on_leave_pressed() -> void:
+	save_now()
 	Network.leave()
 	_back_to_menu("")
 
@@ -113,6 +121,7 @@ func _on_leave_pressed() -> void:
 # ------------------------------------------------------------------ red
 func _on_peer_connected(id: int) -> void:
 	if multiplayer.is_server():
+		_receive_world_id.rpc_id(id, Network.world_id)
 		_add_player(id)
 		world.send_state_to(id)
 
@@ -122,6 +131,7 @@ func _on_peer_disconnected(id: int) -> void:
 		var p := players.get_node_or_null(str(id))
 		if p:
 			p.queue_free()
+		world.forget_peer(id)
 
 
 func _on_connected_to_server() -> void:
@@ -134,6 +144,7 @@ func _on_connection_failed() -> void:
 
 
 func _on_server_disconnected() -> void:
+	save_now()
 	Network.leave()
 	_back_to_menu("El anfitrión cerró la partida.")
 
@@ -147,6 +158,12 @@ func _add_player(id: int) -> void:
 # ------------------------------------------------------------------ estados
 func _start_game() -> void:
 	in_game = true
+	if _autosave == null:
+		_autosave = Timer.new()
+		_autosave.wait_time = 60.0
+		_autosave.timeout.connect(save_now)
+		add_child(_autosave)
+	_autosave.start()
 	menu_panel.visible = false
 	hud.visible = true
 	status_label.text = ""
@@ -161,6 +178,9 @@ func _back_to_menu(message: String) -> void:
 		z.queue_free()
 	if _zombie_timer:
 		_zombie_timer.stop()
+	if _autosave:
+		_autosave.stop()
+	Network.world_id = ""
 	world.reset_containers()
 	menu_camera.current = true
 	get_tree().paused = false
@@ -169,6 +189,7 @@ func _back_to_menu(message: String) -> void:
 	hud.player = null
 	menu_panel.visible = true
 	status_label.text = message
+	_refresh_save_info()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
@@ -244,6 +265,17 @@ func _build_ui() -> void:
 	name_edit.max_length = 20
 	box.add_child(name_edit)
 
+	save_label = Label.new()
+	save_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	save_label.add_theme_font_size_override("font_size", 17)
+	box.add_child(save_label)
+	new_game_check = CheckBox.new()
+	new_game_check.text = "Empezar de cero (borra la partida guardada)"
+	new_game_check.add_theme_color_override("font_color", INK)
+	new_game_check.add_theme_color_override("font_hover_color", ACCENT)
+	new_game_check.add_theme_color_override("font_pressed_color", ACCENT)
+	box.add_child(new_game_check)
+	_refresh_save_info()
 	box.add_child(_button("Jugar solo", _on_solo_pressed))
 	box.add_child(_button("Crear partida (anfitrión)", _on_host_pressed))
 
@@ -435,3 +467,54 @@ func _spawn_zombie() -> void:
 		z.net_yaw = z.rotation.y
 		zombies.add_child(z, true)
 		return
+
+
+# ------------------------------------------------------------------ guardado
+## Al crear la partida (solo o anfitrión): cargar la guardada o empezar una nueva.
+func _prepare_world() -> void:
+	var d := {}
+	if not new_game_check.button_pressed:
+		d = SaveGame.load_world()
+	if d.is_empty():
+		SaveGame.delete_world()
+		world.reset_containers()
+		Network.world_id = SaveGame.new_world_id()
+		SaveGame.save_world({"world_id": Network.world_id})
+	else:
+		Network.world_id = d.world_id
+		world.import_state(d)
+	new_game_check.button_pressed = false
+
+
+@rpc("authority", "call_remote", "reliable")
+func _receive_world_id(id: String) -> void:
+	Network.world_id = id
+	var me := players.get_node_or_null(str(multiplayer.get_unique_id()))
+	if me:
+		me.try_load()
+
+
+func save_now() -> void:
+	if not in_game:
+		return
+	if multiplayer.is_server() and not Network.world_id.is_empty():
+		var d: Dictionary = world.export_state()
+		d.world_id = Network.world_id
+		SaveGame.save_world(d)
+	var me := players.get_node_or_null(str(multiplayer.get_unique_id()))
+	if me:
+		me.save_state()
+
+
+func _refresh_save_info() -> void:
+	if save_label == null:
+		return
+	var has := SaveGame.has_world()
+	save_label.text = "Hay una partida guardada: al jugar solo o crear partida, continúas." if has else ""
+	save_label.visible = has
+	new_game_check.visible = has
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		save_now()

@@ -50,6 +50,9 @@ static func roll_loot(type: String) -> Dictionary:
 			var lo: int = entry[2] if entry.size() > 2 else 1
 			var hi: int = entry[3] if entry.size() > 3 else 1
 			out[entry[0]] = out.get(entry[0], 0) + randi_range(lo, hi)
+	# la pistola viene con su cargador
+	if out.has("pistola"):
+		out["balas"] = out.get("balas", 0) + 6
 	return out
 
 

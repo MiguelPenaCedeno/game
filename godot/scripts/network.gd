@@ -8,6 +8,8 @@ const PORT := 7777
 const MAX_CLIENTS := 3
 
 var player_name := "Superviviente"
+## identificador de la partida guardada (lo decide el anfitrión)
+var world_id := ""
 
 
 func host() -> Error:
